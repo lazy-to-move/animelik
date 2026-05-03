@@ -29,6 +29,12 @@ async function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  Referer: BASE_URL,
+};
+
 function decodeBase64Url(value: string): string | null {
   if (!value) return null;
 
@@ -82,6 +88,36 @@ function inferServer(serverName: string, url: string): string {
 
   const cleanedLabel = serverName.replace(/[^a-z0-9]+/gi, '').trim();
   return cleanedLabel || 'direct';
+}
+
+async function resolveYonaPlaySources(embedUrl: string): Promise<VideoSource[]> {
+  try {
+    const response = await fetch(embedUrl, { headers: FETCH_HEADERS });
+    if (!response.ok) return [];
+
+    const html = await response.text();
+    const matches = [...html.matchAll(/go_to_player\('([^']+)'\)[\s\S]*?<span>([^<]+)<\/span>[\s\S]*?<p>([^<]*)<\/p>/gi)];
+    const sources: VideoSource[] = [];
+
+    for (const match of matches) {
+      const nestedUrl = normalizeAbsoluteUrl(decodeBase64Url(match[1]));
+      if (!nestedUrl) continue;
+
+      const serverLabel = (match[2] || '').trim().toLowerCase();
+      const qualityLabel = (match[3] || '').trim().toLowerCase();
+
+      sources.push({
+        server: inferServer(serverLabel, nestedUrl),
+        quality: inferQuality(qualityLabel || serverLabel),
+        url: nestedUrl,
+      });
+    }
+
+    return sources;
+  } catch (error) {
+    console.error('Failed to resolve YonaPlay sources:', error);
+    return [];
+  }
 }
 
 async function extractCoverImage(page: Page): Promise<string | undefined> {
@@ -282,6 +318,14 @@ export async function scrapeEpisodeSources(episodeId: string): Promise<VideoSour
       const decodedUrl = normalizeAbsoluteUrl(decodeBase64Url(item.link) || item.link);
       if (!decodedUrl) continue;
 
+      if (decodedUrl.includes('yonaplay.')) {
+        const nestedSources = await resolveYonaPlaySources(decodedUrl);
+        if (nestedSources.length > 0) {
+          sources.push(...nestedSources);
+          continue;
+        }
+      }
+
       sources.push({
         server: inferServer(item.label, decodedUrl),
         quality: inferQuality(item.label),
@@ -308,6 +352,14 @@ export async function scrapeEpisodeSources(episodeId: string): Promise<VideoSour
 
         const normalizedUrl = normalizeAbsoluteUrl(embedUrl);
         if (!normalizedUrl) continue;
+
+        if (normalizedUrl.includes('yonaplay.')) {
+          const nestedSources = await resolveYonaPlaySources(normalizedUrl);
+          if (nestedSources.length > 0) {
+            sources.push(...nestedSources);
+            continue;
+          }
+        }
 
         sources.push({
           server: inferServer(serverName, normalizedUrl),
