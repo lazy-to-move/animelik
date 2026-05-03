@@ -22,6 +22,7 @@ export default function App() {
         <Route path="/watchlist" element={<Watchlist />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Login />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       <Footer />
