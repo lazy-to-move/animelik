@@ -203,7 +203,7 @@ function mergeScrapedAndEnrichedAnime(siteData: ScraperAnime, enrichedData: Part
     ...siteData,
     ...enrichedData,
     synopsis: normalizeSynopsis(siteData.synopsis) || normalizeSynopsis(enrichedData.synopsis) || "",
-    status: siteData.status,
+    status: enrichedData.status ?? siteData.status,
     type: siteData.type,
     episodesCount: siteData.episodesCount,
   };

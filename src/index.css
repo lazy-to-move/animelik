@@ -40,6 +40,16 @@
   html {
     scroll-behavior: smooth;
   }
+
+  select {
+    color-scheme: dark;
+  }
+
+  select option,
+  select optgroup {
+    color: #f7f4ff;
+    background-color: #120d22;
+  }
 }
 
 @layer components {

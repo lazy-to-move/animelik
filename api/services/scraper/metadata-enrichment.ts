@@ -5,6 +5,7 @@ type JikanSearchItem = {
   title?: string;
   title_english?: string;
   title_japanese?: string;
+  status?: string;
   synopsis?: string;
   year?: number;
   score?: number;
@@ -32,6 +33,15 @@ type JikanSearchItem = {
 };
 
 type ResolvedMetadata = Partial<ScraperAnime>;
+
+function mapJikanStatus(status?: string): ScraperAnime["status"] | undefined {
+  const text = status?.toLowerCase().trim();
+  if (!text) return undefined;
+  if (text.includes("finished")) return "completed";
+  if (text.includes("currently airing")) return "ongoing";
+  if (text.includes("not yet aired")) return "upcoming";
+  return undefined;
+}
 
 const JIKAN_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
@@ -156,6 +166,7 @@ function mapJikanToMetadata(item: JikanSearchItem, base: ScraperAnime): Resolved
     synopsis: item.synopsis || base.synopsis,
     coverImage: images.coverImage || base.coverImage,
     bannerImage: images.bannerImage || images.coverImage || base.bannerImage,
+    status: mapJikanStatus(item.status) || base.status,
     releaseYear:
       item.year ||
       item.aired?.prop?.from?.year ||

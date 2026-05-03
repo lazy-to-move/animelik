@@ -11,6 +11,17 @@ export interface GenericSiteConfig {
   searchUrls?: ((query: string) => string)[];
 }
 
+interface StructuredAnimeData {
+  title?: string;
+  alternateTitle?: string;
+  description?: string;
+  image?: string;
+  episodesCount?: number;
+  genres?: string[];
+  rating?: string;
+  year?: number;
+}
+
 const browserCache = new Map<string, Browser>();
 
 async function getBrowser(cacheKey: string): Promise<Browser> {
@@ -294,6 +305,19 @@ function extractLabeledValue(text: string, labels: string[]): string {
   return "";
 }
 
+function cleanStructuredSynopsisText(value: string): string {
+  const collapsed = value.replace(/\s+/g, " ").trim();
+  const storyIndex = collapsed.search(/(?:قصة|Ù‚ØµØ©)\s+(?:انمي|Ø§Ù†Ù…ÙŠ|الانمي|Ø§Ù„Ø§Ù†Ù…ÙŠ)\b/i);
+  let cleaned = storyIndex >= 0 ? collapsed.slice(storyIndex) : collapsed;
+
+  cleaned = cleaned
+    .replace(/^(?:ملخص القصة|Ù…Ù„Ø®Øµ Ø§Ù„Ù‚ØµØ©)\s*/i, "")
+    .replace(/\s*(?:اقرأ المزيد|Ø§Ù‚Ø±Ø£ Ø§Ù„Ù…Ø²ÙŠØ¯|قد يعجبك(?: أيضاً| ايضا)?|Ù‚Ø¯ ÙŠØ¹Ø¬Ø¨Ùƒ|الحلقات|Ø§Ù„Ø­Ù„Ù‚Ø§Øª|مواسم أخرى|Ø§Ù„Ù…ÙˆØ§Ø³Ù…).*$/i, "")
+    .trim();
+
+  return cleaned;
+}
+
 function cleanSynopsisText(value: string): string {
   const collapsed = value
     .replace(/\s+/g, " ")
@@ -322,6 +346,58 @@ async function extractCoverImage(page: Page, baseUrl: string): Promise<string | 
   if (ogImage) return normalizeAbsoluteUrl(baseUrl, ogImage);
 
   return undefined;
+}
+
+async function extractStructuredAnimeData(page: Page, baseUrl: string): Promise<StructuredAnimeData> {
+  const scripts = await page.$$eval('script[type="application/ld+json"]', (nodes) =>
+    nodes.map((node) => node.textContent?.trim() || "").filter(Boolean),
+  ).catch(() => []);
+
+  for (const scriptText of scripts) {
+    try {
+      const parsed = JSON.parse(scriptText);
+      const candidates = Array.isArray(parsed)
+        ? parsed
+        : parsed?.["@graph"] && Array.isArray(parsed["@graph"])
+          ? parsed["@graph"]
+          : [parsed];
+
+      for (const candidate of candidates) {
+        const type = String(candidate?.["@type"] ?? "");
+        if (!/(TVSeries|Movie|Series|AnimeSeries)/i.test(type)) continue;
+
+        const imageValue = typeof candidate?.image === "string"
+          ? candidate.image
+          : typeof candidate?.image?.url === "string"
+            ? candidate.image.url
+            : undefined;
+        const genres = Array.isArray(candidate?.genre)
+          ? candidate.genre.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+          : typeof candidate?.genre === "string"
+            ? [candidate.genre]
+            : [];
+        const ratingValue = typeof candidate?.aggregateRating?.ratingValue === "string" || typeof candidate?.aggregateRating?.ratingValue === "number"
+          ? String(candidate.aggregateRating.ratingValue)
+          : undefined;
+        const yearMatch = String(candidate?.datePublished ?? "").match(/(\d{4})/);
+
+        return {
+          title: typeof candidate?.name === "string" ? candidate.name.trim() : undefined,
+          alternateTitle: typeof candidate?.alternateName === "string" ? candidate.alternateName.trim() : undefined,
+          description: typeof candidate?.description === "string" ? candidate.description.trim() : undefined,
+          image: normalizeAbsoluteUrl(baseUrl, imageValue),
+          episodesCount: Number.isFinite(Number(candidate?.numberOfEpisodes)) ? Number(candidate.numberOfEpisodes) : undefined,
+          genres,
+          rating: ratingValue ? `${ratingValue} / 10` : undefined,
+          year: yearMatch ? Number.parseInt(yearMatch[1], 10) : undefined,
+        };
+      }
+    } catch {
+      // Ignore malformed structured data blocks
+    }
+  }
+
+  return {};
 }
 
 export async function scrapeAnimeEpisodesWithConfig(config: GenericSiteConfig, animeSlug: string): Promise<ScraperEpisode[]> {
@@ -359,6 +435,7 @@ export async function scrapeAnimeEpisodesWithConfig(config: GenericSiteConfig, a
       const decodedHref = decodeBase64Url(encoded);
       const absoluteHref = normalizeAbsoluteUrl(config.baseUrl, decodedHref || episode.href);
       if (!absoluteHref) continue;
+      if (!absoluteHref.toLowerCase().includes(`${animeSlug.toLowerCase()}-episode-`)) continue;
       if (!looksLikeEpisodeLink(`${episode.title} ${episode.imageText}`, absoluteHref, episodePathSegment)) continue;
 
       const id = deriveEpisodeId(absoluteHref, episodePathSegment);
@@ -400,11 +477,12 @@ export async function scrapeAnimeInfoWithConfig(config: GenericSiteConfig, slug:
 
     await page.waitForSelector("h1, .anime-details-title, .anime-title, [class*='title']", { timeout: 10000 });
 
+    const structured = await extractStructuredAnimeData(page, config.baseUrl);
     const title = await page.$eval("h1, .anime-details-title, .anime-title, [class*='title']", (el) => el.textContent?.trim() || "").catch(() => "");
     const ogTitle = await page.$eval("meta[property='og:title']", (el) => el.getAttribute("content") || "").catch(() => "");
     const documentTitle = await page.title().catch(() => "");
     const synopsis = await page.$eval(".content, p.anime-story, [class*='synopsis'], [class*='description'], .story, .anime-story, .entry-content p", (el) => el.textContent?.trim() || "").catch(() => "");
-    const coverImage = await extractCoverImage(page, config.baseUrl);
+    const coverImage = structured.image ?? await extractCoverImage(page, config.baseUrl);
     const statusText = await page.$eval("div.anime-info, [class*='status'], .anime-status, .status", (el) => el.textContent?.toLowerCase() || "").catch(() => "");
     const typeText = await page.$eval("div.anime-info, .anime-card-type, [class*='type']", (el) => el.textContent?.toLowerCase() || "").catch(() => "");
     const ratingText = await page.$eval("[class*='rating'], .anime-rating, .score, [class*='score']", (el) => el.textContent?.trim() || "").catch(() => "");
@@ -424,21 +502,25 @@ export async function scrapeAnimeInfoWithConfig(config: GenericSiteConfig, slug:
     const resolvedYear = yearText || extractLabeledValue(pageText, ["بداية العرض", "تاريخ الاصدار", "عرض من", "release", "year"]);
     const yearMatch = resolvedYear.match(/(\d{4})/);
     const malId = malUrl.match(/myanimelist\.net\/anime\/(\d+)/)?.[1];
+    const finalSynopsis = cleanStructuredSynopsisText(structured.description || resolvedSynopsis);
+    const finalRating = structured.rating || resolvedRating;
+    const finalReleaseYear = structured.year ?? (yearMatch ? Number.parseInt(yearMatch[1], 10) : undefined);
+    const finalGenres = structured.genres?.join(" | ") || genreText || undefined;
 
     return {
       slug,
-      title: pickBestTitle(title, ogTitle, documentTitle, slug.replace(/-/g, " ")),
-      synopsis: resolvedSynopsis.slice(0, 2000),
+      title: pickBestTitle(structured.title, structured.alternateTitle, title, ogTitle, documentTitle, slug.replace(/-/g, " ")),
+      synopsis: finalSynopsis.slice(0, 2000),
       coverImage,
       externalId: malId,
       sourceUrl: url,
       status: toStatus(statusText),
       type: toType(typeText),
-      episodesCount: Math.min(scrapedEpisodes.length, 500),
-      rating: resolvedRating || undefined,
+      episodesCount: Math.min(Math.max(scrapedEpisodes.length, structured.episodesCount ?? 0), 500),
+      rating: finalRating || undefined,
       studio: resolvedStudio || undefined,
-      releaseYear: yearMatch ? Number.parseInt(yearMatch[1], 10) : undefined,
-      categoryName: genreText || undefined,
+      releaseYear: finalReleaseYear,
+      categoryName: finalGenres,
     };
   } catch (err) {
     console.error(`Error scraping anime ${config.id}/${slug}:`, err);
@@ -458,7 +540,7 @@ export async function scrapeEpisodeSourcesWithConfig(config: GenericSiteConfig, 
     const url = episodeId.startsWith("http://") || episodeId.startsWith("https://") ? episodeId : `${config.baseUrl}${episodePathSegment}${episodeId}`;
     if (!await safeNavigate(page, url)) return [];
 
-    await page.waitForSelector("#episode-servers .server-link, #episode-servers li, .servers li, .server-list li", { timeout: 10000 });
+    await page.waitForSelector("#episode-servers .server-link, #episode-servers li, .servers li, .server-list li, iframe[src], script[type='application/ld+json'], [x-data*='activeUrl']", { timeout: 10000 });
 
     const directSources = await page.$$eval(
       "#episode-servers .server-link, #episode-servers li, .servers li, .server-list li",
@@ -486,6 +568,83 @@ export async function scrapeEpisodeSourcesWithConfig(config: GenericSiteConfig, 
         quality: inferQuality(item.label),
         url: decodedUrl,
       });
+    }
+
+    if (sources.length === 0) {
+      const scriptedSources = await page.$$eval("a, button, [role='button']", (elements) => {
+        const matches: Array<{ label: string; url: string }> = [];
+
+        for (const el of elements) {
+          const clickHandler =
+            el.getAttribute("@click") ||
+            el.getAttribute("x-on:click") ||
+            el.getAttribute("onclick") ||
+            "";
+
+          const match = clickHandler.match(/setServer\(['"]([^'"]+)['"]\)/i);
+          if (!match?.[1]) continue;
+
+          matches.push({
+            label: (el.textContent || "").trim().toLowerCase(),
+            url: match[1],
+          });
+        }
+
+        return matches;
+      }).catch(() => []);
+
+      for (const item of scriptedSources) {
+        const normalizedUrl = normalizeAbsoluteUrl(config.baseUrl, unwrapProviderUrl(item.url));
+        if (!normalizedUrl || isPlaceholderLink(normalizedUrl)) continue;
+
+        sources.push({
+          server: inferServer(item.label, normalizedUrl),
+          quality: inferQuality(item.label),
+          url: normalizedUrl,
+        });
+      }
+    }
+
+    if (sources.length === 0) {
+      const activeUrl = await page
+        .$eval("[x-data*='activeUrl']", (el) => el.getAttribute("x-data") || "")
+        .then((xData) => xData.match(/activeUrl:\s*'([^']+)'/)?.[1] || xData.match(/activeUrl:\s*"([^"]+)"/)?.[1] || "")
+        .catch(() => "");
+
+      const ldJsonSources = await page.$$eval('script[type="application/ld+json"]', (nodes) => {
+        const results: string[] = [];
+        for (const node of nodes) {
+          const text = node.textContent?.trim();
+          if (!text) continue;
+          try {
+            const parsed = JSON.parse(text);
+            const candidates = Array.isArray(parsed)
+              ? parsed
+              : parsed?.["@graph"] && Array.isArray(parsed["@graph"])
+                ? parsed["@graph"]
+                : [parsed];
+
+            for (const candidate of candidates) {
+              const embedUrl = typeof candidate?.embedUrl === "string" ? candidate.embedUrl : "";
+              if (embedUrl) results.push(embedUrl);
+            }
+          } catch {
+            // ignore malformed blocks
+          }
+        }
+        return results;
+      }).catch(() => []);
+
+      for (const candidateUrl of [activeUrl, ...ldJsonSources]) {
+        const normalizedUrl = normalizeAbsoluteUrl(config.baseUrl, unwrapProviderUrl(candidateUrl));
+        if (!normalizedUrl || isPlaceholderLink(normalizedUrl)) continue;
+
+        sources.push({
+          server: inferServer("direct", normalizedUrl),
+          quality: "hd",
+          url: normalizedUrl,
+        });
+      }
     }
 
     if (sources.length === 0) {
