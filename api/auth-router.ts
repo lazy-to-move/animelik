@@ -9,8 +9,9 @@ import { users } from "@db/schema";
 import { eq } from "drizzle-orm";
 import { env } from "./lib/env";
 import { signSessionToken } from "./kimi/session";
-import { findUserByEmail } from "./queries/users";
+import { findUserByEmail, findUserByGoogleId } from "./queries/users";
 import { hashPassword, normalizeEmail, verifyPassword } from "./lib/passwords";
+import { verifyGoogleCredential } from "./google-auth";
 
 const authCredentialsSchema = z.object({
   email: z.string().email().max(320),
@@ -19,6 +20,10 @@ const authCredentialsSchema = z.object({
 
 const signUpSchema = authCredentialsSchema.extend({
   name: z.string().trim().min(2).max(60),
+});
+
+const googleSignInSchema = z.object({
+  credential: z.string().min(1),
 });
 
 async function createSession(unionId: string) {
@@ -111,6 +116,56 @@ export const authRouter = createRouter({
     } catch (err: unknown) {
       console.error("Sign in error:", err);
       throw new Error(err instanceof Error ? err.message : "Sign in failed");
+    }
+  }),
+
+  googleSignIn: publicQuery.input(googleSignInSchema).mutation(async ({ ctx, input }) => {
+    try {
+      const googleUser = await verifyGoogleCredential(input.credential);
+      const db = getDb();
+      const email = normalizeEmail(googleUser.email);
+      const googleUnionId = `google:${googleUser.sub}`;
+
+      let user = await findUserByGoogleId(googleUser.sub);
+      if (!user) {
+        user = await findUserByEmail(email);
+      }
+
+      if (user) {
+        await db
+          .update(users)
+          .set({
+            googleId: googleUser.sub,
+            email,
+            name: googleUser.name ?? user.name,
+            avatar: googleUser.picture ?? user.avatar,
+            lastSignInAt: new Date(),
+          })
+          .where(eq(users.id, user.id));
+      } else {
+        await db.insert(users).values({
+          unionId: googleUnionId,
+          googleId: googleUser.sub,
+          email,
+          name: googleUser.name,
+          avatar: googleUser.picture,
+          role: "user",
+          lastSignInAt: new Date(),
+        });
+        user = await findUserByGoogleId(googleUser.sub);
+      }
+
+      if (!user) {
+        throw new Error("Failed to complete Google sign-in.");
+      }
+
+      const token = await createSession(user.unionId);
+      setSessionCookie(ctx.resHeaders, ctx.req.headers, token);
+
+      return { success: true };
+    } catch (err: unknown) {
+      console.error("Google sign-in error:", err);
+      throw new Error(err instanceof Error ? err.message : "Google sign-in failed");
     }
   }),
 

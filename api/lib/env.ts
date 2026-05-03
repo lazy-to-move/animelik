@@ -11,6 +11,7 @@ function required(name: string): string {
 export const env = {
   appId: required("APP_ID"),
   appSecret: required("APP_SECRET"),
+  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   isProduction: process.env.NODE_ENV === "production",
   databaseUrl: required("DATABASE_URL"),
   kimiAuthUrl: process.env.KIMI_AUTH_URL ?? "",

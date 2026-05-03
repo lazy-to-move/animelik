@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Loader2, Tv } from "lucide-react";
 import { motion } from "framer-motion";
@@ -6,6 +6,29 @@ import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 
 type AuthMode = "signin" | "signup";
+
+type GoogleCredentialResponse = {
+  credential?: string;
+};
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (options: {
+            client_id: string;
+            callback: (response: GoogleCredentialResponse) => void;
+          }) => void;
+          renderButton: (
+            parent: HTMLElement,
+            options: Record<string, string | number | boolean>,
+          ) => void;
+        };
+      };
+    };
+  }
+}
 
 const emptyForm = {
   name: "",
@@ -20,6 +43,8 @@ export default function Login() {
   const [mode, setMode] = useState<AuthMode>(location.pathname === "/signup" ? "signup" : "signin");
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
   const utils = trpc.useUtils();
 
@@ -39,6 +64,14 @@ export default function Login() {
     onError: (mutationError) => setError(mutationError.message),
   });
 
+  const googleSignInMutation = trpc.auth.googleSignIn.useMutation({
+    onSuccess: async () => {
+      await utils.invalidate();
+      navigate("/");
+    },
+    onError: (mutationError) => setError(mutationError.message),
+  });
+
   useEffect(() => {
     setMode(location.pathname === "/signup" ? "signup" : "signin");
     setError("");
@@ -50,7 +83,53 @@ export default function Login() {
     }
   }, [authLoading, isAuthenticated, navigate]);
 
-  const isSubmitting = signInMutation.isPending || signUpMutation.isPending;
+  useEffect(() => {
+    if (!googleClientId || !googleButtonRef.current) return;
+
+    const mountGoogleButton = () => {
+      if (!window.google?.accounts?.id || !googleButtonRef.current) return;
+
+      googleButtonRef.current.innerHTML = "";
+      window.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: (response) => {
+          const credential = response.credential;
+          if (!credential) {
+            setError("Google sign-in did not return a credential.");
+            return;
+          }
+          setError("");
+          googleSignInMutation.mutate({ credential });
+        },
+      });
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        theme: "outline",
+        size: "large",
+        shape: "pill",
+        text: mode === "signin" ? "signin_with" : "signup_with",
+        width: "320",
+      });
+    };
+
+    const existingScript = document.querySelector<HTMLScriptElement>('script[data-google-identity="true"]');
+    if (existingScript && window.google?.accounts?.id) {
+      mountGoogleButton();
+      return;
+    }
+
+    const script = existingScript ?? document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.dataset.googleIdentity = "true";
+    script.onload = mountGoogleButton;
+
+    if (!existingScript) {
+      document.head.appendChild(script);
+    }
+  }, [googleClientId, googleSignInMutation, mode]);
+
+  const isSubmitting = signInMutation.isPending || signUpMutation.isPending || googleSignInMutation.isPending;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -172,6 +251,19 @@ export default function Login() {
                 )}
               </button>
             </form>
+
+            {googleClientId && (
+              <>
+                <div className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-[0.24em] text-[#70698b]">
+                  <div className="h-px flex-1 bg-white/10" />
+                  Or continue with
+                  <div className="h-px flex-1 bg-white/10" />
+                </div>
+                <div className="flex justify-center">
+                  <div ref={googleButtonRef} />
+                </div>
+              </>
+            )}
 
             <p className="mt-6 text-center text-sm text-[#968eb2]">
               {mode === "signin" ? "Need an account?" : "Already have an account?"}{" "}

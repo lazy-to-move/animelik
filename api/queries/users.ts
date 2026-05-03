@@ -22,6 +22,15 @@ export async function findUserByEmail(email: string) {
   return rows.at(0);
 }
 
+export async function findUserByGoogleId(googleId: string) {
+  const rows = await getDb()
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.googleId, googleId))
+    .limit(1);
+  return rows.at(0);
+}
+
 export async function upsertUser(data: InsertUser) {
   const values = { ...data };
   const updateSet: Partial<InsertUser> = {

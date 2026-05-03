@@ -23,6 +23,7 @@ export type EpisodeVideoSource = {
 export const users = mysqlTable("users", {
   id: serial("id").primaryKey(),
   unionId: varchar("unionId", { length: 255 }).notNull().unique(),
+  googleId: varchar("googleId", { length: 255 }).unique(),
   name: varchar("name", { length: 255 }),
   email: varchar("email", { length: 320 }),
   passwordHash: varchar("passwordHash", { length: 255 }),
