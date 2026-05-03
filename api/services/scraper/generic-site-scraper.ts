@@ -281,6 +281,21 @@ function deriveEpisodeId(absoluteHref: string, episodePathSegment: string): stri
   return extractEpisodeIdFromUrl(absoluteHref, episodePathSegment) ?? absoluteHref;
 }
 
+function looksLikeAnimeEpisodeUrl(config: GenericSiteConfig, animeSlug: string, absoluteHref: string): boolean {
+  const normalizedHref = absoluteHref.toLowerCase();
+  const normalizedSlug = animeSlug.toLowerCase();
+
+  if (!normalizedHref.includes('/episode/')) return false;
+  if (!normalizedHref.includes(normalizedSlug)) return false;
+  if (normalizedHref.includes(`${normalizedSlug}-episode-`)) return true;
+
+  if (config.id === 'anime4up') {
+    return true;
+  }
+
+  return false;
+}
+
 function isPlaceholderLink(url: string): boolean {
   const normalized = url.trim().toLowerCase();
   return (
@@ -435,7 +450,7 @@ export async function scrapeAnimeEpisodesWithConfig(config: GenericSiteConfig, a
       const decodedHref = decodeBase64Url(encoded);
       const absoluteHref = normalizeAbsoluteUrl(config.baseUrl, decodedHref || episode.href);
       if (!absoluteHref) continue;
-      if (!absoluteHref.toLowerCase().includes(`${animeSlug.toLowerCase()}-episode-`)) continue;
+      if (!looksLikeAnimeEpisodeUrl(config, animeSlug, absoluteHref)) continue;
       if (!looksLikeEpisodeLink(`${episode.title} ${episode.imageText}`, absoluteHref, episodePathSegment)) continue;
 
       const id = deriveEpisodeId(absoluteHref, episodePathSegment);
@@ -548,8 +563,10 @@ export async function scrapeEpisodeSourcesWithConfig(config: GenericSiteConfig, 
         elements.map((el) => {
           const label = (el.querySelector(".ser, .notice, span")?.textContent || el.textContent || "").trim().toLowerCase();
           const link =
+            el.getAttribute("data-watch") ||
             el.getAttribute("data-embed") ||
             el.getAttribute("data-url") ||
+            el.querySelector("a")?.getAttribute("data-watch") ||
             el.querySelector("a")?.getAttribute("data-embed") ||
             el.querySelector("a")?.getAttribute("data-url") ||
             el.querySelector("a")?.getAttribute("href") ||
@@ -656,12 +673,26 @@ export async function scrapeEpisodeSourcesWithConfig(config: GenericSiteConfig, 
           .catch(async () => serverItem.evaluate((el) => el.textContent?.trim().toLowerCase() || ""));
 
         const embeddedUrl = await serverItem
-          .$eval("a", (anchor) => anchor.getAttribute("data-embed") || anchor.getAttribute("data-url") || anchor.getAttribute("href") || "")
+          .$eval(
+            "a",
+            (anchor) =>
+              anchor.getAttribute("data-watch") ||
+              anchor.getAttribute("data-embed") ||
+              anchor.getAttribute("data-url") ||
+              anchor.getAttribute("href") ||
+              "",
+          )
           .catch(() => "");
+
+        const inlineEmbeddedUrl =
+          embeddedUrl ||
+          await serverItem.evaluate(
+            (el) => el.getAttribute("data-watch") || el.getAttribute("data-embed") || el.getAttribute("data-url") || "",
+          ).catch(() => "");
 
         const normalizedEmbeddedUrl = normalizeAbsoluteUrl(
           config.baseUrl,
-          unwrapProviderUrl(decodeBase64Url(embeddedUrl) || embeddedUrl),
+          unwrapProviderUrl(decodeBase64Url(inlineEmbeddedUrl) || inlineEmbeddedUrl),
         );
         if (normalizedEmbeddedUrl && !isPlaceholderLink(normalizedEmbeddedUrl)) {
           sources.push({
