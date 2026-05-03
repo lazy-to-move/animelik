@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router";
+import { Routes, Route, useLocation } from "react-router";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import Home from "./pages/Home";
@@ -11,9 +11,12 @@ import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
 export default function App() {
+  const location = useLocation();
+  const isAuthRoute = location.pathname === "/login" || location.pathname === "/signup";
+
   return (
     <div className="min-h-screen bg-[#030209]">
-      <Navbar />
+      {!isAuthRoute && <Navbar />}
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/browse" element={<Browse />} />
@@ -25,7 +28,7 @@ export default function App() {
         <Route path="/signup" element={<Login />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-      <Footer />
+      {!isAuthRoute && <Footer />}
     </div>
   );
 }

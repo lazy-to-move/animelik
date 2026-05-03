@@ -1,30 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { Loader2, ShieldCheck, Sparkles, Tv } from "lucide-react";
+import { Loader2, Tv } from "lucide-react";
 import { motion } from "framer-motion";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 
-function getOAuthUrl() {
-  const kimiAuthUrl = import.meta.env.VITE_KIMI_AUTH_URL;
-  const appID = import.meta.env.VITE_APP_ID;
-  if (!kimiAuthUrl || !appID) return null;
-
-  const redirectUri = `${window.location.origin}/api/oauth/callback`;
-  const state = btoa(redirectUri);
-  const url = new URL(`${kimiAuthUrl}/api/oauth/authorize`);
-  url.searchParams.set("client_id", appID);
-  url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "profile");
-  url.searchParams.set("state", state);
-
-  return url.toString();
-}
-
 type AuthMode = "signin" | "signup";
 
-const defaultForm = {
+const emptyForm = {
   name: "",
   email: "",
   password: "",
@@ -35,20 +18,17 @@ export default function Login() {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [mode, setMode] = useState<AuthMode>(location.pathname === "/signup" ? "signup" : "signin");
-  const [form, setForm] = useState(defaultForm);
+  const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
 
   const utils = trpc.useUtils();
-  const oauthUrl = useMemo(() => getOAuthUrl(), []);
 
   const signInMutation = trpc.auth.signIn.useMutation({
     onSuccess: async () => {
       await utils.invalidate();
       navigate("/");
     },
-    onError: (mutationError) => {
-      setError(mutationError.message);
-    },
+    onError: (mutationError) => setError(mutationError.message),
   });
 
   const signUpMutation = trpc.auth.signUp.useMutation({
@@ -56,23 +36,12 @@ export default function Login() {
       await utils.invalidate();
       navigate("/");
     },
-    onError: (mutationError) => {
-      setError(mutationError.message);
-    },
-  });
-
-  const devLoginMutation = trpc.auth.devLogin.useMutation({
-    onSuccess: async () => {
-      await utils.invalidate();
-      navigate("/");
-    },
-    onError: (mutationError) => {
-      setError(mutationError.message);
-    },
+    onError: (mutationError) => setError(mutationError.message),
   });
 
   useEffect(() => {
     setMode(location.pathname === "/signup" ? "signup" : "signin");
+    setError("");
   }, [location.pathname]);
 
   useEffect(() => {
@@ -81,14 +50,7 @@ export default function Login() {
     }
   }, [authLoading, isAuthenticated, navigate]);
 
-  const isSubmitting =
-    signInMutation.isPending || signUpMutation.isPending || devLoginMutation.isPending;
-
-  const title = mode === "signin" ? "Sign in to Synx" : "Create your Synx account";
-  const subtitle =
-    mode === "signin"
-      ? "Pick up your watchlist, continue episodes, and keep your account under your control."
-      : "Create a real site account with email and password so you can track anime properly.";
+  const isSubmitting = signInMutation.isPending || signUpMutation.isPending;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -110,88 +72,51 @@ export default function Login() {
   };
 
   const switchMode = (nextMode: AuthMode) => {
-    setError("");
-    setForm(defaultForm);
+    setForm(emptyForm);
     navigate(nextMode === "signin" ? "/login" : "/signup");
   };
 
   return (
-    <div className="min-h-screen bg-[#030209] relative overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(105,61,239,0.28),_transparent_40%),radial-gradient(circle_at_bottom_right,_rgba(31,181,255,0.14),_transparent_28%)]" />
-      <div className="absolute top-20 left-1/2 -translate-x-1/2 w-[560px] h-[560px] bg-[#693def]/10 rounded-full blur-[120px]" />
+    <div className="relative min-h-screen overflow-hidden bg-[#05030d] text-white">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(103,65,246,0.24),_transparent_30%),radial-gradient(circle_at_bottom,_rgba(27,120,255,0.08),_transparent_30%)]" />
+      <div className="absolute inset-x-0 top-0 h-[220px] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),transparent)]" />
 
-      <div className="relative z-10 min-h-screen flex items-center justify-center px-4 py-28">
+      <div className="relative z-10 flex min-h-screen items-center justify-center px-4 py-12">
         <motion.div
-          initial={{ opacity: 0, y: 24 }}
+          initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45 }}
-          className="w-full max-w-5xl grid gap-8 lg:grid-cols-[1.1fr_0.9fr]"
+          transition={{ duration: 0.35 }}
+          className="w-full max-w-md"
         >
-          <div className="hidden lg:flex flex-col justify-between glass-panel p-10 min-h-[640px]">
-            <div>
-              <div className="inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-[#d7d0ff]">
-                <Tv className="w-4 h-4 text-[#8a63ff]" />
-                Built for anime tracking, watch history, and multi-source streaming
+          <div className="rounded-[30px] border border-white/10 bg-[#0f0b1c]/92 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-8">
+            <Link to="/" className="inline-flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#693def] to-[#8a63ff] shadow-[0_18px_40px_rgba(105,61,239,0.35)]">
+                <Tv className="h-6 w-6 text-white" />
               </div>
+              <div>
+                <div className="text-2xl font-black tracking-tight">Synx</div>
+                <div className="text-xs uppercase tracking-[0.24em] text-[#8e84ae]">Account</div>
+              </div>
+            </Link>
 
-              <h1 className="mt-8 text-5xl font-black leading-[1] tracking-tight text-white">
-                Proper account access for your anime site.
+            <div className="mt-8">
+              <h1 className="text-3xl font-black tracking-tight">
+                {mode === "signin" ? "Sign in" : "Create account"}
               </h1>
-
-              <p className="mt-6 max-w-xl text-base leading-7 text-[#b8b0d9]">
-                Save your watchlist, keep session state stable, and stop relying on a dev shortcut
-                as the main entry point.
+              <p className="mt-2 text-sm leading-6 text-[#9b93b8]">
+                {mode === "signin"
+                  ? "Use your site account to access watchlists, reviews, and your saved progress."
+                  : "Create a site-owned account with email and password."}
               </p>
             </div>
 
-            <div className="grid gap-4">
-              <FeatureCard
-                icon={<ShieldCheck className="w-5 h-5 text-[#8a63ff]" />}
-                title="Real site-owned auth"
-                text="Email and password accounts that belong to your platform, not a temporary workaround."
-              />
-              <FeatureCard
-                icon={<Sparkles className="w-5 h-5 text-[#31d0ff]" />}
-                title="Keeps your app flow clean"
-                text="Same session cookie model, cleaner routing, and a stable base for watchlists, reviews, and admin access."
-              />
-            </div>
-          </div>
-
-          <div className="glass-panel p-6 sm:p-8 lg:p-10">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#693def] to-[#8a63ff] flex items-center justify-center shadow-[0_20px_60px_rgba(105,61,239,0.3)]">
-                  <Tv className="w-7 h-7 text-white" />
-                </div>
-                <h2 className="mt-6 text-3xl font-bold text-white">{title}</h2>
-                <p className="mt-2 text-sm leading-6 text-[#a39abf]">{subtitle}</p>
-              </div>
-            </div>
-
-            <div className="mt-8 grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-white/[0.03] p-1.5">
-              <button
-                type="button"
-                onClick={() => switchMode("signin")}
-                className={`rounded-xl px-4 py-3 text-sm font-semibold transition-all ${
-                  mode === "signin"
-                    ? "bg-[#6f46f6] text-white shadow-[0_12px_32px_rgba(111,70,246,0.35)]"
-                    : "text-[#9d95bc] hover:text-white"
-                }`}
-              >
+            <div className="mt-8 grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-black/20 p-1.5">
+              <ModeButton active={mode === "signin"} onClick={() => switchMode("signin")}>
                 Sign In
-              </button>
-              <button
-                type="button"
-                onClick={() => switchMode("signup")}
-                className={`rounded-xl px-4 py-3 text-sm font-semibold transition-all ${
-                  mode === "signup"
-                    ? "bg-[#6f46f6] text-white shadow-[0_12px_32px_rgba(111,70,246,0.35)]"
-                    : "text-[#9d95bc] hover:text-white"
-                }`}
-              >
+              </ModeButton>
+              <ModeButton active={mode === "signup"} onClick={() => switchMode("signup")}>
                 Sign Up
-              </button>
+              </ModeButton>
             </div>
 
             <form onSubmit={handleSubmit} className="mt-8 space-y-5">
@@ -220,12 +145,12 @@ export default function Login() {
                 type="password"
                 value={form.password}
                 onChange={(value) => setForm((current) => ({ ...current, password: value }))}
-                placeholder="At least 8 characters"
+                placeholder={mode === "signin" ? "Your password" : "At least 8 characters"}
                 autoComplete={mode === "signin" ? "current-password" : "new-password"}
               />
 
               {error && (
-                <div className="rounded-2xl border border-[#ff5f7a]/25 bg-[#ff5f7a]/10 px-4 py-3 text-sm text-[#ffd1db]">
+                <div className="rounded-2xl border border-[#ff6a88]/20 bg-[#ff6a88]/10 px-4 py-3 text-sm text-[#ffd7df]">
                   {error}
                 </div>
               )}
@@ -233,11 +158,11 @@ export default function Login() {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full rounded-2xl bg-gradient-to-r from-[#693def] to-[#8a63ff] px-5 py-4 text-base font-semibold text-white transition-all hover:scale-[1.01] hover:shadow-[0_18px_44px_rgba(105,61,239,0.35)] disabled:cursor-not-allowed disabled:opacity-70"
+                className="flex h-14 w-full items-center justify-center rounded-2xl bg-gradient-to-r from-[#693def] to-[#8a63ff] px-5 text-base font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_rgba(105,61,239,0.32)] disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {isSubmitting ? (
                   <span className="inline-flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                     Working...
                   </span>
                 ) : mode === "signin" ? (
@@ -248,44 +173,11 @@ export default function Login() {
               </button>
             </form>
 
-            <div className="my-7 flex items-center gap-3 text-xs uppercase tracking-[0.28em] text-[#6b6287]">
-              <div className="h-px flex-1 bg-white/10" />
-              Optional
-              <div className="h-px flex-1 bg-white/10" />
-            </div>
-
-            <div className="space-y-3">
-              {oauthUrl && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    window.location.href = oauthUrl;
-                  }}
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-sm font-medium text-white transition-all hover:bg-white/10"
-                >
-                  Continue with Kimi
-                </button>
-              )}
-
-              {import.meta.env.DEV && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError("");
-                    devLoginMutation.mutate();
-                  }}
-                  className="w-full rounded-2xl border border-dashed border-[#8a63ff]/40 bg-[#8a63ff]/10 px-5 py-4 text-sm font-medium text-[#e5dcff] transition-all hover:bg-[#8a63ff]/15"
-                >
-                  Dev admin shortcut
-                </button>
-              )}
-            </div>
-
-            <p className="mt-6 text-center text-sm text-[#948bab]">
+            <p className="mt-6 text-center text-sm text-[#968eb2]">
               {mode === "signin" ? "Need an account?" : "Already have an account?"}{" "}
               <Link
                 to={mode === "signin" ? "/signup" : "/login"}
-                className="font-semibold text-[#c8baff] hover:text-white"
+                className="font-semibold text-[#d3c9ff] transition-colors hover:text-white"
               >
                 {mode === "signin" ? "Create one" : "Sign in"}
               </Link>
@@ -297,27 +189,27 @@ export default function Login() {
   );
 }
 
-function FeatureCard({
-  icon,
-  title,
-  text,
+function ModeButton({
+  active,
+  onClick,
+  children,
 }: {
-  icon: React.ReactNode;
-  title: string;
-  text: string;
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-3xl border border-white/8 bg-white/[0.03] p-5">
-      <div className="flex items-start gap-4">
-        <div className="mt-1 flex h-11 w-11 items-center justify-center rounded-2xl bg-white/5">
-          {icon}
-        </div>
-        <div>
-          <h3 className="text-base font-semibold text-white">{title}</h3>
-          <p className="mt-2 text-sm leading-6 text-[#a39abf]">{text}</p>
-        </div>
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-xl px-4 py-3 text-sm font-semibold transition-all ${
+        active
+          ? "bg-[#6d45f4] text-white shadow-[0_12px_28px_rgba(109,69,244,0.3)]"
+          : "text-[#958caf] hover:text-white"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -338,7 +230,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-sm font-medium text-[#d9d3ef]">{label}</span>
+      <span className="mb-2 block text-sm font-medium text-[#d9d4ed]">{label}</span>
       <input
         type={type}
         value={value}
@@ -346,7 +238,7 @@ function Field({
         placeholder={placeholder}
         autoComplete={autoComplete}
         required
-        className="w-full rounded-2xl border border-white/10 bg-[#0d0a18] px-4 py-3.5 text-white placeholder:text-[#70678d] outline-none transition-all focus:border-[#8a63ff] focus:ring-2 focus:ring-[#8a63ff]/20"
+        className="h-14 w-full rounded-2xl border border-white/10 bg-[#151025] px-4 text-white [caret-color:#ffffff] [-webkit-text-fill-color:#ffffff] placeholder:text-[#6f6788] outline-none transition-all focus:border-[#8c72ff] focus:ring-2 focus:ring-[#8c72ff]/20"
       />
     </label>
   );

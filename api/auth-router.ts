@@ -114,40 +114,6 @@ export const authRouter = createRouter({
     }
   }),
 
-  devLogin: publicQuery.mutation(async ({ ctx }) => {
-    if (env.isProduction) {
-      throw new Error("Dev login is disabled in production.");
-    }
-
-    try {
-      const db = getDb();
-
-      let user = await db.select().from(users).where(eq(users.unionId, "local:dev-admin")).limit(1);
-
-      if (!user.length) {
-        const [inserted] = await db.insert(users).values({
-          unionId: "local:dev-admin",
-          name: "Dev Admin",
-          email: "dev@localhost",
-          role: "admin",
-          lastSignInAt: new Date(),
-        }).$returningId();
-        user = await db.select().from(users).where(eq(users.id, inserted.id));
-      } else if (user[0].role !== "admin") {
-        await db.update(users).set({ role: "admin", lastSignInAt: new Date() }).where(eq(users.id, user[0].id));
-        user = await db.select().from(users).where(eq(users.id, user[0].id));
-      }
-
-      const token = await createSession(user[0].unionId);
-      setSessionCookie(ctx.resHeaders, ctx.req.headers, token);
-
-      return { success: true };
-    } catch (err: unknown) {
-      console.error("Dev login error:", err);
-      throw new Error(err instanceof Error ? err.message : "Login failed");
-    }
-  }),
-
   me: authedQuery.query((opts) => opts.ctx.user),
   logout: authedQuery.mutation(async ({ ctx }) => {
     clearSessionCookie(ctx.resHeaders, ctx.req.headers);
