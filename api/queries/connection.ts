@@ -1,5 +1,5 @@
-import { drizzle } from "drizzle-orm/mysql2";
-import mysql from "mysql2/promise";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import { env } from "../lib/env";
 import * as schema from "@db/schema";
 import * as relations from "@db/relations";
@@ -7,14 +7,12 @@ import * as relations from "@db/relations";
 const fullSchema = { ...schema, ...relations };
 
 function createDb() {
-  const pool = mysql.createPool({
-    uri: env.databaseUrl,
-    waitForConnections: true,
-    connectionLimit: 10,
+  const pool = new Pool({
+    connectionString: env.databaseUrl,
+    max: 10,
   });
 
   return drizzle(pool, {
-    mode: "default",
     schema: fullSchema,
   });
 }

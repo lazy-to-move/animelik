@@ -60,7 +60,7 @@ export const episodeRouter = createRouter({
       const [inserted] = await db.insert(episodes).values({
         ...input,
         airDate: input.airDate ? new Date(input.airDate) : undefined,
-      }).$returningId();
+      }).returning({ id: episodes.id });
       const id = inserted.id;
       const results = await db.select().from(episodes).where(eq(episodes.id, id));
       return results[0];

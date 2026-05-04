@@ -1,13 +1,31 @@
-import mysql from 'mysql2/promise';
+import "dotenv/config";
+import { randomUUID } from "node:crypto";
+import { Pool } from "pg";
+import { hashPassword, normalizeEmail } from "./api/lib/passwords.ts";
 
-const c = await mysql.createConnection('mysql://root:YGJQSvvndtUT@localhost:3307/anime_db');
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
-await c.query(`INSERT INTO users (unionId, name, email, role) VALUES (?, ?, ?, ?)`, 
-  ['dev-user', 'Dev Admin', 'dev@localhost', 'admin']);
+const email = normalizeEmail(process.env.ADMIN_EMAIL ?? "admin@synx.local");
+const password = process.env.ADMIN_PASSWORD ?? "ChangeMe!123456";
+const name = process.env.ADMIN_NAME ?? "Site Admin";
+const unionId = `local:${email}:${randomUUID()}`;
+const passwordHash = await hashPassword(password);
 
-console.log('Admin user created!');
+const result = await pool.query(
+  `
+    INSERT INTO "users" ("unionId", "name", "email", "passwordHash", "role")
+    VALUES ($1, $2, $3, $4, 'admin')
+    ON CONFLICT ("email")
+    DO UPDATE SET
+      "name" = EXCLUDED."name",
+      "passwordHash" = EXCLUDED."passwordHash",
+      "role" = 'admin'
+    RETURNING "id", "email", "role"
+  `,
+  [unionId, name, email, passwordHash],
+);
 
-const [users] = await c.query('SELECT * FROM users');
-console.log('All users:', users);
-
-await c.end();
+console.log("Admin user ready:", result.rows[0]);
+await pool.end();

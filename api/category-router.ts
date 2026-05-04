@@ -20,7 +20,7 @@ export const categoryRouter = createRouter({
     )
     .mutation(async ({ input }) => {
       const db = getDb();
-      const [inserted] = await db.insert(categories).values(input).$returningId();
+      const [inserted] = await db.insert(categories).values(input).returning({ id: categories.id });
       const id = inserted.id;
       const results = await db.select().from(categories).where(eq(categories.id, id));
       return results[0];

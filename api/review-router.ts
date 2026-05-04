@@ -42,7 +42,7 @@ export const reviewRouter = createRouter({
         animeId: input.animeId,
         rating: input.rating,
         comment: input.comment,
-      }).$returningId();
+      }).returning({ id: reviews.id });
       const id = inserted.id;
       const results = await db.select().from(reviews).where(eq(reviews.id, id));
       return results[0];

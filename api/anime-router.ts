@@ -277,7 +277,7 @@ export const animeRouter = createRouter({
     )
     .mutation(async ({ input }) => {
       const db = getDb();
-      const [inserted] = await db.insert(anime).values(input).$returningId();
+      const [inserted] = await db.insert(anime).values(input).returning({ id: anime.id });
       const id = inserted.id;
       const results = await db.select().from(anime).where(eq(anime.id, id));
       return results[0];

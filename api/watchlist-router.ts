@@ -99,7 +99,7 @@ export const watchlistRouter = createRouter({
         userId,
         animeId: input.animeId,
         status: input.status ?? "watching",
-      }).$returningId();
+      }).returning({ id: watchlist.id });
       const id = inserted.id;
       const results = await db.select().from(watchlist).where(eq(watchlist.id, id));
       return results[0];

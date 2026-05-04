@@ -1,26 +1,43 @@
-import mysql from 'mysql2/promise';
-import * as jose from 'jose';
+import "dotenv/config";
+import * as jose from "jose";
+import { Pool } from "pg";
 
-const c = await mysql.createConnection('mysql://root:@localhost:3306/anime_db');
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
-const [users] = await c.query('SELECT * FROM users WHERE unionId = ?', ['dev-user']);
-console.log('Users found:', users.length);
+const unionId = process.env.DEV_UNION_ID ?? "dev-user";
+const email = process.env.DEV_EMAIL ?? "dev@localhost";
+const name = process.env.DEV_NAME ?? "Dev Admin";
 
-if (!users.length) {
-  await c.query(`INSERT INTO users (unionId, name, email, role) VALUES (?, ?, ?, ?)`, 
-    ['dev-user', 'Dev Admin', 'dev@localhost', 'admin']);
-  console.log('Created dev user');
+const existing = await pool.query(
+  `SELECT "id", "unionId", "email", "role" FROM "users" WHERE "unionId" = $1 LIMIT 1`,
+  [unionId],
+);
+
+let user = existing.rows[0];
+
+if (!user) {
+  const inserted = await pool.query(
+    `
+      INSERT INTO "users" ("unionId", "name", "email", "role")
+      VALUES ($1, $2, $3, 'admin')
+      RETURNING "id", "unionId", "email", "role"
+    `,
+    [unionId, name, email],
+  );
+  user = inserted.rows[0];
+  console.log("Created dev user");
 }
 
-// Create JWT token using jose
-const secret = new TextEncoder().encode('dev-secret-key-min-32-chars-long-here');
-const token = await new jose.SignJWT({ sub: '1', role: 'admin' })
-  .setProtectedHeader({ alg: 'HS256' })
+const secret = new TextEncoder().encode(process.env.DEV_SESSION_SECRET ?? "dev-secret-key-min-32-chars-long-here");
+const token = await new jose.SignJWT({ sub: String(user.id), role: user.role, unionId: user.unionId })
+  .setProtectedHeader({ alg: "HS256" })
   .setIssuedAt()
-  .setExpirationTime('7d')
+  .setExpirationTime("7d")
   .sign(secret);
 
-console.log('Token generated!');
-console.log('Use this cookie: session=' + token);
+console.log("User:", user);
+console.log(`Use this cookie: session=${token}`);
 
-await c.end();
+await pool.end();

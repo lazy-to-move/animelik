@@ -193,7 +193,7 @@ async function ensureCategoryIds(db: ReturnType<typeof getDb>, categoryName?: st
     }
 
     const slug = toCategorySlug(normalizedName) || `category-${Date.now()}`;
-    const [newCat] = await db.insert(categories).values({ name: normalizedName, slug }).$returningId();
+    const [newCat] = await db.insert(categories).values({ name: normalizedName, slug }).returning({ id: categories.id });
     categoryIds.push(newCat.id);
   }
 
@@ -320,7 +320,7 @@ async function persistAnimeRecord({
   const [inserted] = await db.insert(anime).values({
     ...payload,
     slug: normalizedSlug,
-  }).$returningId();
+  }).returning({ id: anime.id });
 
   await syncAnimeGenreLinks(db, inserted.id, categoryIds);
 
