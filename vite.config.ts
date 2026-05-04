@@ -25,5 +25,14 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom", "react-router"],
+          motion: ["framer-motion"],
+          trpc: ["@tanstack/react-query", "@trpc/client", "@trpc/react-query", "superjson"],
+        },
+      },
+    },
   },
 });

@@ -6,6 +6,7 @@ import { watchlistRouter } from "./watchlist-router";
 import { reviewRouter } from "./review-router";
 import { dashboardRouter } from "./dashboard-router";
 import { scraperRouter } from "./scraper-router";
+import { scheduleRouter } from "./schedule-router";
 import { createRouter, publicQuery } from "./middleware";
 
 export const appRouter = createRouter({
@@ -18,6 +19,7 @@ export const appRouter = createRouter({
   review: reviewRouter,
   dashboard: dashboardRouter,
   scraper: scraperRouter,
+  schedule: scheduleRouter,
 });
 
 export type AppRouter = typeof appRouter;

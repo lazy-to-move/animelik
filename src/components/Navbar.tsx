@@ -44,6 +44,7 @@ export default function Navbar() {
   const navLinks = [
     { label: "Home", path: "/" },
     { label: "Browse", path: "/browse" },
+    { label: "Schedule", path: "/schedule" },
     { label: "Watchlist", path: "/watchlist" },
   ];
 

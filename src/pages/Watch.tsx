@@ -1,7 +1,7 @@
 import { useParams, Link, useNavigate } from "react-router";
 import {
   ChevronLeft, ChevronRight, Play, List, MessageSquare,
-  Star, Send, Settings, Globe
+  Star, Send, Settings, Globe,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
@@ -42,7 +42,22 @@ const QUALITY_LABELS: Record<VideoSource["quality"], string> = {
   fhd: "FHD (1080p)",
 };
 
-const SERVER_PRIORITY = ["streamwish", "yonaplay", "videa", "mp4upload", "voe", "uqload", "vkvideo", "fileupload", "share4max", "larhu", "dsvplay", "mega", "fourShared", "soraplay"] as const;
+const SERVER_PRIORITY = [
+  "streamwish",
+  "yonaplay",
+  "videa",
+  "mp4upload",
+  "voe",
+  "uqload",
+  "vkvideo",
+  "fileupload",
+  "share4max",
+  "larhu",
+  "dsvplay",
+  "mega",
+  "fourShared",
+  "soraplay",
+] as const;
 const QUALITY_ORDER: VideoSource["quality"][] = ["fhd", "hd", "sd"];
 
 function parseVideoSources(rawSources: unknown): VideoSource[] {
@@ -87,15 +102,15 @@ export default function Watch() {
 
   const { data: anime } = trpc.anime.bySlug.useQuery(
     { slug: slug || "" },
-    { enabled: !!slug }
+    { enabled: !!slug },
   );
   const { data: episodeList } = trpc.episode.list.useQuery(
     { animeId: anime?.id || 0 },
-    { enabled: !!anime?.id }
+    { enabled: !!anime?.id },
   );
   const { data: reviews } = trpc.review.list.useQuery(
     { animeId: anime?.id || 0 },
-    { enabled: !!anime?.id }
+    { enabled: !!anime?.id },
   );
 
   const utils = trpc.useUtils();
@@ -150,8 +165,8 @@ export default function Watch() {
 
   if (!anime) {
     return (
-      <div className="min-h-screen bg-[#030209] flex items-center justify-center">
-        <div className="w-10 h-10 border-2 border-[#693def] border-t-transparent rounded-full animate-spin" />
+      <div className="flex min-h-screen items-center justify-center bg-[#030209]">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-[#693def] border-t-transparent" />
       </div>
     );
   }
@@ -190,7 +205,7 @@ export default function Watch() {
                       </div>
                       <h2 className="mb-2 text-2xl font-black tracking-tight text-white">{anime.title}</h2>
                       <p className="mb-4 text-lg font-bold text-[#8257f2] opacity-80">
-                        {currentEpisode?.title || `الحلقة ${currentEpNum}`}
+                        {currentEpisode?.title || `Episode ${currentEpNum}`}
                       </p>
                       <p className="mx-auto max-w-md text-sm font-medium leading-relaxed text-[#6f6986]">
                         We&apos;re still preparing this episode stream. Try another source or come back in a moment.
@@ -264,7 +279,7 @@ export default function Watch() {
               <div className="mb-8 flex flex-col justify-between gap-6 border-b border-white/5 pb-8 md:flex-row md:items-center">
                 <div>
                   <h1 className="mb-2 text-3xl font-black tracking-tight text-white">{anime.title}</h1>
-                  <p className="text-xl font-bold text-[#693def] opacity-90">{currentEpisode?.title || `الحلقة ${currentEpNum}`}</p>
+                  <p className="text-xl font-bold text-[#693def] opacity-90">{currentEpisode?.title || `Episode ${currentEpNum}`}</p>
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -450,12 +465,12 @@ export default function Watch() {
                       <p className={`mb-1 text-[10px] font-black uppercase tracking-widest ${
                         episode.number === currentEpNum ? "text-white/80" : "text-[#693def]"
                       }`}>
-                        الحلقة {episode.number}
+                        Episode {episode.number}
                       </p>
                       <p className={`truncate text-sm font-bold ${
                         episode.number === currentEpNum ? "text-white" : "text-[#dddddd]"
                       }`}>
-                        {episode.title || `الحلقة ${episode.number}`}
+                        {episode.title || `Episode ${episode.number}`}
                       </p>
                     </div>
                   </button>
