@@ -19,10 +19,10 @@ export type EpisodeVideoSource = {
   url: string;
 };
 
-const userRoleEnum = pgEnum("role", ["user", "admin"]);
-const animeStatusEnum = pgEnum("anime_status", ["ongoing", "completed", "upcoming"]);
-const animeTypeEnum = pgEnum("anime_type", ["tv", "movie", "ova", "special"]);
-const watchlistStatusEnum = pgEnum("watchlist_status", ["watching", "completed", "plan_to_watch", "dropped"]);
+export const userRoleEnum = pgEnum("role", ["user", "admin"]);
+export const animeStatusEnum = pgEnum("anime_status", ["ongoing", "completed", "upcoming"]);
+export const animeTypeEnum = pgEnum("anime_type", ["tv", "movie", "ova", "special"]);
+export const watchlistStatusEnum = pgEnum("watchlist_status", ["watching", "completed", "plan_to_watch", "dropped"]);
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
