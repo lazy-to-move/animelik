@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Loader2, Tv } from "lucide-react";
 import { motion } from "framer-motion";
-import { trpc } from "@/providers/trpc";
+import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 
 type AuthMode = "signin" | "signup";
@@ -40,11 +40,11 @@ export default function Login() {
   const location = useLocation();
   const navigate = useNavigate();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const [mode, setMode] = useState<AuthMode>(location.pathname === "/signup" ? "signup" : "signin");
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+  const mode: AuthMode = location.pathname === "/signup" ? "signup" : "signin";
 
   const utils = trpc.useUtils();
 
@@ -71,11 +71,6 @@ export default function Login() {
     },
     onError: (mutationError) => setError(mutationError.message),
   });
-
-  useEffect(() => {
-    setMode(location.pathname === "/signup" ? "signup" : "signin");
-    setError("");
-  }, [location.pathname]);
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
@@ -152,6 +147,7 @@ export default function Login() {
 
   const switchMode = (nextMode: AuthMode) => {
     setForm(emptyForm);
+    setError("");
     navigate(nextMode === "signin" ? "/login" : "/signup");
   };
 
@@ -179,6 +175,12 @@ export default function Login() {
             </Link>
 
             <div className="mt-8">
+              <Link
+                to="/"
+                className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#9a93b6] transition-colors hover:border-white/20 hover:text-white"
+              >
+                Back to site
+              </Link>
               <h1 className="text-3xl font-black tracking-tight">
                 {mode === "signin" ? "Sign in" : "Create account"}
               </h1>
@@ -330,7 +332,7 @@ function Field({
         placeholder={placeholder}
         autoComplete={autoComplete}
         required
-        className="h-14 w-full rounded-2xl border border-white/10 bg-[#151025] px-4 text-white [caret-color:#ffffff] [-webkit-text-fill-color:#ffffff] placeholder:text-[#6f6788] outline-none transition-all focus:border-[#8c72ff] focus:ring-2 focus:ring-[#8c72ff]/20"
+        className="h-14 w-full rounded-2xl border border-white/10 bg-[#151025] px-4 text-white [caret-color:#ffffff] [-webkit-text-fill-color:#ffffff] placeholder:text-[#8d86a8] placeholder:font-normal outline-none transition-all focus:border-[#8c72ff] focus:ring-2 focus:ring-[#8c72ff]/20"
       />
     </label>
   );

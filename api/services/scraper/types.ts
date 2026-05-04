@@ -22,8 +22,10 @@ export interface EpisodeSources {
 export interface ScraperAnime {
   slug: string;
   title: string;
+  titleEnglish?: string;
   titleJp?: string;
   titleArabic?: string;
+  titleSynonyms?: string[];
   synopsis?: string;
   coverImage?: string;
   bannerImage?: string;

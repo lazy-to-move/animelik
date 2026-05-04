@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, inArray } from "drizzle-orm";
 import { createRouter, publicQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { episodes } from "@db/schema";
@@ -99,5 +99,13 @@ export const episodeRouter = createRouter({
       const db = getDb();
       await db.delete(episodes).where(eq(episodes.id, input.id));
       return { success: true };
+    }),
+
+  bulkDelete: adminQuery
+    .input(z.object({ ids: z.array(z.number()).min(1) }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      await db.delete(episodes).where(inArray(episodes.id, input.ids));
+      return { success: true, deletedCount: input.ids.length };
     }),
 });

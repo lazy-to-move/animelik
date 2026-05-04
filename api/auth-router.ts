@@ -170,7 +170,7 @@ export const authRouter = createRouter({
   }),
 
   me: authedQuery.query((opts) => opts.ctx.user),
-  logout: authedQuery.mutation(async ({ ctx }) => {
+  logout: publicQuery.mutation(async ({ ctx }) => {
     clearSessionCookie(ctx.resHeaders, ctx.req.headers);
     return { success: true };
   }),

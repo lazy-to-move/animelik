@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ImageOff } from "lucide-react";
 
 type AnimeArtworkProps = {
@@ -31,19 +31,17 @@ export default function AnimeArtwork({
   imageClassName = "",
   fallbackClassName = "",
 }: AnimeArtworkProps) {
-  const [hasError, setHasError] = useState(false);
-
-  useEffect(() => {
-    setHasError(false);
-  }, [src]);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const hasError = Boolean(src && failedSrc === src);
 
   if (src && !hasError) {
     return (
       <img
+        key={src}
         src={src}
         alt={alt}
         className={`${className} ${imageClassName}`.trim()}
-        onError={() => setHasError(true)}
+        onError={() => setFailedSrc(src)}
       />
     );
   }

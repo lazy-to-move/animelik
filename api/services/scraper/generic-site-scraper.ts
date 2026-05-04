@@ -1,3 +1,4 @@
+/* eslint-disable no-irregular-whitespace */
 import puppeteer, { Browser, Page } from "puppeteer";
 import type { ScraperAnime, ScraperEpisode, SourceSiteId, VideoSource } from "./types";
 
@@ -284,10 +285,12 @@ function deriveEpisodeId(absoluteHref: string, episodePathSegment: string): stri
 function looksLikeAnimeEpisodeUrl(config: GenericSiteConfig, animeSlug: string, absoluteHref: string): boolean {
   const normalizedHref = absoluteHref.toLowerCase();
   const normalizedSlug = animeSlug.toLowerCase();
+  const episodeTail = normalizedHref.split('/episode/')[1] ?? "";
 
   if (!normalizedHref.includes('/episode/')) return false;
   if (!normalizedHref.includes(normalizedSlug)) return false;
   if (normalizedHref.includes(`${normalizedSlug}-episode-`)) return true;
+  if (episodeTail.startsWith(`${normalizedSlug}-`) && /\d{1,4}/.test(episodeTail)) return true;
 
   if (config.id === 'anime4up') {
     return true;

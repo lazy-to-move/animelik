@@ -16,14 +16,14 @@ export default function Footer() {
             <p className="text-sm text-[#777777] leading-relaxed font-medium mb-6">
               Your premium destination for anime streaming. Discover, watch, and share your favorite series with the world.
             </p>
-            <div className="flex items-center gap-4">
-              <a href="#" className="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center text-[#888888] hover:text-[#693def] hover:bg-white/10 transition-all">
+            <div className="flex items-center gap-3">
+              <a href="#" className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-[#888888] hover:text-[#693def] hover:bg-white/10 transition-all duration-300 ease-out hover:scale-110 hover:shadow-[0_0_20px_rgba(105,61,239,0.3)]">
                 <Twitter className="w-4 h-4" />
               </a>
-              <a href="#" className="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center text-[#888888] hover:text-[#693def] hover:bg-white/10 transition-all">
+              <a href="#" className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-[#888888] hover:text-[#693def] hover:bg-white/10 transition-all duration-300 ease-out hover:scale-110 hover:shadow-[0_0_20px_rgba(105,61,239,0.3)]">
                 <Instagram className="w-4 h-4" />
               </a>
-              <a href="#" className="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center text-[#888888] hover:text-[#693def] hover:bg-white/10 transition-all">
+              <a href="#" className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-[#888888] hover:text-[#693def] hover:bg-white/10 transition-all duration-300 ease-out hover:scale-110 hover:shadow-[0_0_20px_rgba(105,61,239,0.3)]">
                 <Github className="w-4 h-4" />
               </a>
             </div>
@@ -31,12 +31,12 @@ export default function Footer() {
           
           <div>
             <h4 className="text-xs font-black text-white uppercase tracking-[0.2em] mb-6">Navigation</h4>
-            <ul className="space-y-4">
+            <ul className="space-y-3">
               {["Home", "Browse", "Watchlist", "Schedule"].map((item) => (
                 <li key={item}>
                   <Link 
                     to={item === "Home" ? "/" : `/${item.toLowerCase()}`} 
-                    className="text-sm text-[#777777] hover:text-white transition-colors font-medium"
+                    className="text-sm text-[#777777] hover:text-white transition-all duration-200 ease-out font-medium inline-flex items-center gap-1 hover:translate-x-1"
                   >
                     {item}
                   </Link>
@@ -47,12 +47,12 @@ export default function Footer() {
           
           <div>
             <h4 className="text-xs font-black text-white uppercase tracking-[0.2em] mb-6">Genres</h4>
-            <ul className="space-y-4">
+            <ul className="space-y-3">
               {["Action", "Fantasy", "Sci-Fi", "Romance", "Adventure"].map((item) => (
                 <li key={item}>
                   <Link 
                     to={`/browse?category=${item.toLowerCase()}`} 
-                    className="text-sm text-[#777777] hover:text-white transition-colors font-medium"
+                    className="text-sm text-[#777777] hover:text-white transition-all duration-200 ease-out font-medium inline-flex items-center gap-1 hover:translate-x-1"
                   >
                     {item}
                   </Link>
@@ -63,19 +63,19 @@ export default function Footer() {
           
           <div>
             <h4 className="text-xs font-black text-white uppercase tracking-[0.2em] mb-6">Account</h4>
-            <ul className="space-y-4">
+            <ul className="space-y-3">
               <li>
-                <Link to="/login" className="text-sm text-[#777777] hover:text-white transition-colors font-medium">
+                <Link to="/login" className="text-sm text-[#777777] hover:text-white transition-all duration-200 ease-out font-medium inline-flex items-center gap-1 hover:translate-x-1">
                   Sign In
                 </Link>
               </li>
               <li>
-                <Link to="/watchlist" className="text-sm text-[#777777] hover:text-white transition-colors font-medium">
+                <Link to="/watchlist" className="text-sm text-[#777777] hover:text-white transition-all duration-200 ease-out font-medium inline-flex items-center gap-1 hover:translate-x-1">
                   My Watchlist
                 </Link>
               </li>
               <li>
-                <Link to="/settings" className="text-sm text-[#777777] hover:text-white transition-colors font-medium">
+                <Link to="/settings" className="text-sm text-[#777777] hover:text-white transition-all duration-200 ease-out font-medium inline-flex items-center gap-1 hover:translate-x-1">
                   Settings
                 </Link>
               </li>
@@ -88,8 +88,8 @@ export default function Footer() {
             &copy; {new Date().getFullYear()} Synx Anime • All rights reserved
           </p>
           <div className="flex items-center gap-6">
-            <a href="#" className="text-[11px] text-[#555555] hover:text-[#777777] font-bold uppercase tracking-widest transition-colors">Privacy Policy</a>
-            <a href="#" className="text-[11px] text-[#555555] hover:text-[#777777] font-bold uppercase tracking-widest transition-colors">Terms of Service</a>
+            <a href="#" className="text-[11px] text-[#555555] hover:text-white font-bold uppercase tracking-widest transition-all duration-200 hover:underline underline-offset-4">Privacy Policy</a>
+            <a href="#" className="text-[11px] text-[#555555] hover:text-white font-bold uppercase tracking-widest transition-all duration-200 hover:underline underline-offset-4">Terms of Service</a>
           </div>
         </div>
       </div>

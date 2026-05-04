@@ -1,14 +1,14 @@
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { createRouter, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { watchlist, anime, categories } from "@db/schema";
+import { watchlist, anime, animeGenres, categories } from "@db/schema";
 
 export const watchlistRouter = createRouter({
   list: authedQuery.query(async ({ ctx }) => {
     const db = getDb();
     const userId = ctx.user.id;
-    return db
+    const items = await db
       .select({
         id: watchlist.id,
         userId: watchlist.userId,
@@ -17,16 +17,72 @@ export const watchlistRouter = createRouter({
         currentEpisode: watchlist.currentEpisode,
         createdAt: watchlist.createdAt,
         animeTitle: anime.title,
+        animeTitleEnglish: anime.titleEnglish,
+        animeTitleJp: anime.titleJp,
         animeSlug: anime.slug,
         animeCover: anime.coverImage,
+        animeBanner: anime.bannerImage,
         animeStatus: anime.status,
+        animeType: anime.type,
+        animeScore: anime.score,
+        animeReleaseYear: anime.releaseYear,
         animeEpisodesCount: anime.episodesCount,
-        categoryName: categories.name,
+        categoryId: anime.categoryId,
       })
       .from(watchlist)
       .leftJoin(anime, eq(watchlist.animeId, anime.id))
-      .leftJoin(categories, eq(anime.categoryId, categories.id))
       .where(eq(watchlist.userId, userId));
+
+    const animeIds = items.map((item) => item.animeId);
+    const fallbackCategoryIds = Array.from(
+      new Set(items.map((item) => item.categoryId).filter((value): value is number => value !== null)),
+    );
+    const fallbackCategories = fallbackCategoryIds.length === 0
+      ? []
+      : await db
+          .select({ id: categories.id, name: categories.name })
+          .from(categories)
+          .where(inArray(categories.id, fallbackCategoryIds));
+    const fallbackCategoryMap = new Map(fallbackCategories.map((category) => [category.id, category.name] as const));
+
+    const genreRows = animeIds.length === 0
+      ? []
+      : await db
+          .select({
+            animeId: animeGenres.animeId,
+            categoryId: categories.id,
+            categoryName: categories.name,
+          })
+          .from(animeGenres)
+          .innerJoin(categories, eq(animeGenres.categoryId, categories.id))
+          .where(inArray(animeGenres.animeId, animeIds))
+          .catch(() => []);
+
+    const genreMap = new Map<number, Array<{ id: number; name: string }>>();
+    for (const row of genreRows) {
+      const existing = genreMap.get(row.animeId) ?? [];
+      existing.push({ id: row.categoryId, name: row.categoryName });
+      genreMap.set(row.animeId, existing);
+    }
+
+    return items.map((item) => {
+      const genres = genreMap.get(item.animeId) ?? [];
+      const uniqueNames = Array.from(new Set(genres.map((genre) => genre.name)));
+      const primaryCategory =
+        genres.find((genre) => genre.id === item.categoryId)?.name ??
+        (item.categoryId ? fallbackCategoryMap.get(item.categoryId) : undefined) ??
+        uniqueNames[0];
+      const allGenreNames = primaryCategory && !uniqueNames.includes(primaryCategory)
+        ? [primaryCategory, ...uniqueNames]
+        : uniqueNames;
+
+      return {
+        ...item,
+        genres: allGenreNames,
+        genreNames: allGenreNames.join(" • "),
+        categoryName: primaryCategory,
+      };
+    });
   }),
 
   add: authedQuery

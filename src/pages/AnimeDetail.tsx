@@ -4,10 +4,11 @@ import {
   Play, Plus, Star, Clock, Calendar, Building2, Tv, BookmarkCheck,
   MessageSquare, ChevronLeft, SlidersHorizontal
 } from "lucide-react";
-import { trpc } from "@/providers/trpc";
+import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { useState } from "react";
 import AnimeArtwork from "@/components/AnimeArtwork";
+import MixedSynopsisText from "@/components/MixedSynopsisText";
 
 function normalizeAnimeSlug(slug?: string | null) {
   return (slug ?? "").replace(/^\/+|\/+$/g, "");
@@ -67,21 +68,50 @@ export default function AnimeDetail() {
     );
   }
 
+  const heroImage = anime.bannerImage || anime.coverImage;
+  const hasDedicatedBanner = Boolean(anime.bannerImage && anime.bannerImage !== anime.coverImage);
+
   return (
     <div className="min-h-screen bg-[#030209]">
       {/* Banner */}
       <div className="relative h-[45vh] sm:h-[55vh] overflow-hidden">
-        <AnimeArtwork
-          src={anime.bannerImage || anime.coverImage}
-          alt={anime.title}
-          title={anime.title}
-          className="w-full h-full"
-          imageClassName="w-full h-full object-cover"
-          fallbackClassName="w-full h-full"
-        />
+        {hasDedicatedBanner ? (
+          <AnimeArtwork
+            src={heroImage}
+            alt={anime.title}
+            title={anime.title}
+            className="w-full h-full"
+            imageClassName="w-full h-full object-cover"
+            fallbackClassName="w-full h-full"
+          />
+        ) : (
+          <>
+            <div className="absolute inset-0 scale-110 opacity-85">
+              <AnimeArtwork
+                src={anime.coverImage}
+                alt={anime.title}
+                title={anime.title}
+                className="w-full h-full"
+                imageClassName="w-full h-full object-cover blur-2xl"
+                fallbackClassName="w-full h-full"
+              />
+            </div>
+            <div className="absolute inset-0 opacity-30">
+              <AnimeArtwork
+                src={anime.coverImage}
+                alt={anime.title}
+                title={anime.title}
+                className="w-full h-full"
+                imageClassName="w-full h-full object-cover scale-105"
+                fallbackClassName="w-full h-full"
+              />
+            </div>
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(130,87,242,0.2),transparent_35%),radial-gradient(circle_at_80%_30%,rgba(255,255,255,0.08),transparent_28%)]" />
+          </>
+        )}
         <div className="absolute inset-0 bg-gradient-to-t from-[#030209] via-[#030209]/40 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-r from-[#030209]/60 to-transparent" />
-        <div className="absolute inset-0 bg-black/10" />
+        <div className="absolute inset-0 bg-black/25" />
 
         <div className="absolute top-24 left-4 sm:left-8 z-20">
           <Link
@@ -205,7 +235,9 @@ export default function AnimeDetail() {
               </div>
             </div>
 
-            <p className="text-lg text-[#bbbbbb] font-medium leading-relaxed mb-10 text-left" dir="auto">{anime.synopsis}</p>
+            <MixedSynopsisText className="mb-10 text-lg font-medium leading-relaxed text-[#bbbbbb]" preserveLines>
+              {anime.synopsis}
+            </MixedSynopsisText>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-12">
               <div className="p-5 rounded-2xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors">
@@ -224,7 +256,7 @@ export default function AnimeDetail() {
                 <p className="text-xs font-black text-[#666666] mb-2 uppercase tracking-widest flex items-center gap-2">
                    <SlidersHorizontal className="w-3.5 h-3.5" /> Genre
                 </p>
-                <p className="text-base font-bold text-white">{anime.categoryName || "Unknown"}</p>
+                <p className="text-base font-bold text-white">{anime.genreNames || anime.categoryName || "Unknown"}</p>
               </div>
             </div>
 

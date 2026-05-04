@@ -3,10 +3,11 @@ import {
   ChevronLeft, ChevronRight, Play, List, MessageSquare,
   Star, Send, Settings, Globe
 } from "lucide-react";
-import { trpc } from "@/providers/trpc";
+import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import AnimeArtwork from "@/components/AnimeArtwork";
+import MixedSynopsisText from "@/components/MixedSynopsisText";
 
 function normalizeAnimeSlug(slug?: string | null) {
   return (slug ?? "").replace(/^\/+|\/+$/g, "");
@@ -79,8 +80,8 @@ export default function Watch() {
   const { user } = useAuth();
   const [reviewText, setReviewText] = useState("");
   const [reviewRating, setReviewRating] = useState(8);
-  const [selectedServer, setSelectedServer] = useState<string>("");
-  const [selectedQuality, setSelectedQuality] = useState<VideoSource["quality"]>("hd");
+  const [preferredServer, setPreferredServer] = useState<string>("");
+  const [preferredQuality, setPreferredQuality] = useState<VideoSource["quality"]>("hd");
 
   const currentEpNum = Number(episodeNum) || 1;
 
@@ -116,6 +117,14 @@ export default function Watch() {
     [videoSources],
   );
 
+  const selectedServer = useMemo(() => {
+    if (availableServers.length === 0) return "";
+    if (preferredServer && availableServers.includes(preferredServer)) {
+      return preferredServer;
+    }
+    return availableServers.find((server) => server === "streamwish") ?? availableServers[0];
+  }, [availableServers, preferredServer]);
+
   const filteredSources = useMemo(() => {
     if (!selectedServer) return videoSources;
     return videoSources.filter((source) => source.server === selectedServer);
@@ -125,32 +134,19 @@ export default function Watch() {
     return QUALITY_ORDER.filter((quality) => filteredSources.some((source) => source.quality === quality));
   }, [filteredSources]);
 
+  const selectedQuality = useMemo<VideoSource["quality"]>(() => {
+    if (availableQualities.length === 0) return "hd";
+    if (availableQualities.includes(preferredQuality)) {
+      return preferredQuality;
+    }
+    return availableQualities[0] ?? "hd";
+  }, [availableQualities, preferredQuality]);
+
   const currentSource = useMemo(() => {
     const selected = filteredSources.find((source) => source.quality === selectedQuality);
     if (selected) return selected;
     return filteredSources[0];
   }, [filteredSources, selectedQuality]);
-
-  useEffect(() => {
-    if (availableServers.length === 0) {
-      setSelectedServer("");
-      return;
-    }
-
-    const preferredServer = availableServers.find((server) => server === "streamwish") ?? availableServers[0];
-    setSelectedServer(preferredServer);
-  }, [currentEpisode?.id, availableServers]);
-
-  useEffect(() => {
-    if (availableQualities.length === 0) {
-      setSelectedQuality("hd");
-      return;
-    }
-
-    setSelectedQuality((current) => (
-      availableQualities.includes(current) ? current : (availableQualities[0] ?? "hd")
-    ));
-  }, [availableQualities]);
 
   if (!anime) {
     return (
@@ -216,7 +212,7 @@ export default function Watch() {
                           <p className="mb-0.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#555555]">Server</p>
                           <select
                             value={selectedServer}
-                            onChange={(event) => setSelectedServer(event.target.value)}
+                            onChange={(event) => setPreferredServer(event.target.value)}
                             className="cursor-pointer bg-transparent text-sm font-bold text-white focus:outline-none"
                           >
                             {availableServers.map((server) => (
@@ -238,7 +234,7 @@ export default function Watch() {
                           <p className="mb-0.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#555555]">Quality</p>
                           <select
                             value={selectedQuality}
-                            onChange={(event) => setSelectedQuality(event.target.value as VideoSource["quality"])}
+                            onChange={(event) => setPreferredQuality(event.target.value as VideoSource["quality"])}
                             className="cursor-pointer bg-transparent text-sm font-bold text-white focus:outline-none"
                           >
                             {availableQualities.map((quality) => (
@@ -302,13 +298,13 @@ export default function Watch() {
                       <span className="text-sm font-black">{anime.score}</span>
                     </div>
                     <span className="text-[#333333]">|</span>
-                    <span className="text-sm font-bold uppercase tracking-widest text-[#777777]">{anime.categoryName}</span>
+                    <span className="text-sm font-bold uppercase tracking-widest text-[#777777]">{anime.genreNames || anime.categoryName}</span>
                     <span className="text-[#333333]">|</span>
                     <span className="text-sm font-bold uppercase tracking-widest text-[#777777]">{anime.releaseYear}</span>
                   </div>
-                  <p className="text-lg font-medium leading-relaxed text-[#aaaaaa]" dir="auto">
+                  <MixedSynopsisText className="text-lg font-medium leading-relaxed text-[#aaaaaa]" preserveLines>
                     {currentEpisode?.synopsis || anime.synopsis}
-                  </p>
+                  </MixedSynopsisText>
                 </div>
 
                 <Link to={`/anime/${animeSlug}`} className="group flex flex-col items-center gap-2">

@@ -5,6 +5,8 @@ type JikanSearchItem = {
   title?: string;
   title_english?: string;
   title_japanese?: string;
+  title_synonyms?: string[];
+  titles?: Array<{ type?: string; title?: string }>;
   status?: string;
   synopsis?: string;
   year?: number;
@@ -159,10 +161,23 @@ function scoreCandidate(item: JikanSearchItem, query: string, expectedYear?: num
 function mapJikanToMetadata(item: JikanSearchItem, base: ScraperAnime): ResolvedMetadata {
   const images = pickImage(item);
   const numericScore = typeof item.score === "number" ? item.score.toFixed(2) : undefined;
+  const titleSynonyms = Array.from(
+    new Set(
+      [
+        ...(item.title_synonyms ?? []),
+        ...(item.titles?.map((entry) => entry.title).filter(Boolean) as string[] ?? []),
+      ]
+        .map((value) => value.replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .filter((value) => value !== item.title && value !== item.title_english && value !== item.title_japanese),
+    ),
+  );
 
   return {
     externalId: item.mal_id ? String(item.mal_id) : base.externalId,
+    titleEnglish: item.title_english || base.titleEnglish,
     titleJp: item.title_japanese || base.titleJp,
+    titleSynonyms: titleSynonyms.length > 0 ? titleSynonyms : base.titleSynonyms,
     synopsis: item.synopsis || base.synopsis,
     coverImage: images.coverImage || base.coverImage,
     bannerImage: images.bannerImage || images.coverImage || base.bannerImage,

@@ -54,7 +54,9 @@ export type InsertCategory = typeof categories.$inferInsert;
 export const anime = mysqlTable("anime", {
   id: serial("id").primaryKey(),
   title: varchar("title", { length: 255 }).notNull(),
+  titleEnglish: varchar("titleEnglish", { length: 255 }),
   titleJp: varchar("titleJp", { length: 255 }),
+  titleSynonyms: json("titleSynonyms").$type<string[] | null>(),
   slug: varchar("slug", { length: 255 }).notNull().unique(),
   synopsis: text("synopsis").notNull(),
   coverImage: varchar("coverImage", { length: 500 }),
@@ -79,6 +81,16 @@ export const anime = mysqlTable("anime", {
 
 export type Anime = typeof anime.$inferSelect;
 export type InsertAnime = typeof anime.$inferInsert;
+
+export const animeGenres = mysqlTable("animeGenres", {
+  id: serial("id").primaryKey(),
+  animeId: bigint("animeId", { mode: "number", unsigned: true }).notNull().references(() => anime.id),
+  categoryId: bigint("categoryId", { mode: "number", unsigned: true }).notNull().references(() => categories.id),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AnimeGenre = typeof animeGenres.$inferSelect;
+export type InsertAnimeGenre = typeof animeGenres.$inferInsert;
 
 export const episodes = mysqlTable("episodes", {
   id: serial("id").primaryKey(),

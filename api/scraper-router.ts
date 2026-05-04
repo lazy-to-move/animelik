@@ -4,7 +4,7 @@ import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import { createRouter, adminQuery, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { anime, episodes, categories } from "@db/schema";
+import { anime, animeGenres, episodes, categories } from "@db/schema";
 import { getScraperProvider, listScraperProviders } from "./services/scraper/provider-registry";
 import { SOURCE_SITE_IDS, type ScraperAnime, type SourceSiteId } from "./services/scraper/types";
 import { enrichAnimeMetadata } from "./services/scraper/metadata-enrichment";
@@ -49,16 +49,18 @@ function toCategorySlug(name: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-function normalizeCategoryName(categoryName?: string) {
-  if (!categoryName) return undefined;
+function normalizeCategoryNames(categoryName?: string) {
+  if (!categoryName) return [];
 
-  const parts = categoryName
-    .split(/\||,|،|\//)
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  const selected = (parts[0] ?? categoryName).replace(/\s+/g, " ").trim();
-  return selected.slice(0, 100) || undefined;
+  return Array.from(
+    new Set(
+      categoryName
+        .split(/\||,|،|\//)
+        .map((part) => part.replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .map((part) => part.slice(0, 100)),
+    ),
+  );
 }
 
 function humanizeSlug(slug: string) {
@@ -78,6 +80,21 @@ function normalizeTitle(title: string | undefined, slug: string) {
   }
 
   return cleaned.slice(0, 255);
+}
+
+function normalizeTitleSynonyms(values?: string[]) {
+  if (!values?.length) return undefined;
+
+  const normalized = Array.from(
+    new Set(
+      values
+        .map((value) => value.replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .map((value) => value.slice(0, 255)),
+    ),
+  );
+
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function normalizeSynopsis(synopsis?: string) {
@@ -164,16 +181,36 @@ function normalizeEpisodeThumbnail(thumbnail?: string) {
   return cleaned || undefined;
 }
 
-async function ensureCategoryId(db: ReturnType<typeof getDb>, categoryName?: string) {
-  const normalizedName = normalizeCategoryName(categoryName);
-  if (!normalizedName) return undefined;
+async function ensureCategoryIds(db: ReturnType<typeof getDb>, categoryName?: string) {
+  const normalizedNames = normalizeCategoryNames(categoryName);
+  const categoryIds: number[] = [];
 
-  const existingCat = await db.select().from(categories).where(eq(categories.name, normalizedName)).limit(1);
-  if (existingCat.length > 0) return existingCat[0].id;
+  for (const normalizedName of normalizedNames) {
+    const existingCat = await db.select().from(categories).where(eq(categories.name, normalizedName)).limit(1);
+    if (existingCat.length > 0) {
+      categoryIds.push(existingCat[0].id);
+      continue;
+    }
 
-  const slug = toCategorySlug(normalizedName) || `category-${Date.now()}`;
-  const [newCat] = await db.insert(categories).values({ name: normalizedName, slug }).$returningId();
-  return newCat.id;
+    const slug = toCategorySlug(normalizedName) || `category-${Date.now()}`;
+    const [newCat] = await db.insert(categories).values({ name: normalizedName, slug }).$returningId();
+    categoryIds.push(newCat.id);
+  }
+
+  return categoryIds;
+}
+
+async function syncAnimeGenreLinks(db: ReturnType<typeof getDb>, animeId: number, categoryIds: number[]) {
+  await db.delete(animeGenres).where(eq(animeGenres.animeId, animeId));
+
+  if (categoryIds.length === 0) return;
+
+  await db.insert(animeGenres).values(
+    categoryIds.map((categoryId) => ({
+      animeId,
+      categoryId,
+    })),
+  );
 }
 
 function toScoreValue(rating?: string) {
@@ -224,7 +261,8 @@ async function persistAnimeRecord({
 }) {
   const normalizedSlug = normalizeStoredSlug(slug);
   const existingAnime = await db.select().from(anime).where(eq(anime.slug, normalizedSlug)).limit(1);
-  const categoryId = await ensureCategoryId(db, scrapedData.categoryName);
+  const categoryIds = await ensureCategoryIds(db, scrapedData.categoryName);
+  const categoryId = categoryIds[0];
 
   let savedCoverImage = scrapedData.coverImage ?? null;
   if (scrapedData.coverImage?.startsWith("http")) {
@@ -236,19 +274,25 @@ async function persistAnimeRecord({
     savedBannerImage = (await downloadImage(scrapedData.bannerImage, `${normalizedSlug}-banner`)) || scrapedData.bannerImage;
   }
 
+  const existing = existingAnime[0];
   const normalizedTitle = normalizeTitle(scrapedData.title, normalizedSlug);
+  const normalizedTitleEnglish = scrapedData.titleEnglish
+    ? normalizeTitle(scrapedData.titleEnglish, normalizedSlug)
+    : existing?.titleEnglish ?? undefined;
+  const normalizedTitleSynonyms = normalizeTitleSynonyms(scrapedData.titleSynonyms) ?? existing?.titleSynonyms ?? undefined;
   const normalizedSynopsis = normalizeSynopsis(scrapedData.synopsis);
   const normalizedRating = normalizeRating(scrapedData.rating);
   const normalizedStudio = normalizeStudio(scrapedData.studio);
   const normalizedReleaseYear = normalizeReleaseYear(scrapedData.releaseYear);
   const normalizedDuration = normalizeDuration(scrapedData.duration);
-  const existing = existingAnime[0];
   const normalizedEpisodesCount = Math.min(scrapedEpisodesCount || scrapedData.episodesCount, 500);
   const normalizedStatus = inferAnimeStatus(scrapedData.status, normalizedEpisodesCount, existing?.status ?? undefined);
 
   const payload = {
     title: normalizedTitle,
+    titleEnglish: normalizedTitleEnglish,
     titleJp: scrapedData.titleJp ?? existing?.titleJp ?? undefined,
+    titleSynonyms: normalizedTitleSynonyms,
     synopsis: normalizedSynopsis || existing?.synopsis || "",
     coverImage: choosePreferredImage(savedCoverImage, existing?.coverImage),
     bannerImage: choosePreferredImage(savedBannerImage, existing?.bannerImage) ?? choosePreferredImage(savedCoverImage, existing?.coverImage),
@@ -269,6 +313,7 @@ async function persistAnimeRecord({
 
   if (existingAnime.length > 0) {
     await db.update(anime).set(payload).where(eq(anime.id, existingAnime[0].id));
+    await syncAnimeGenreLinks(db, existingAnime[0].id, categoryIds);
     return { animeId: existingAnime[0].id, action: "updated" as const };
   }
 
@@ -276,6 +321,8 @@ async function persistAnimeRecord({
     ...payload,
     slug: normalizedSlug,
   }).$returningId();
+
+  await syncAnimeGenreLinks(db, inserted.id, categoryIds);
 
   return { animeId: inserted.id, action: "created" as const };
 }
@@ -502,7 +549,9 @@ export const scraperRouter = createRouter({
         const baseData: ScraperAnime = {
           slug: current.slug,
           title: current.title,
+          titleEnglish: current.titleEnglish ?? undefined,
           titleJp: current.titleJp ?? undefined,
+          titleSynonyms: current.titleSynonyms ?? undefined,
           synopsis: current.synopsis,
           coverImage: current.coverImage ?? undefined,
           bannerImage: current.bannerImage ?? undefined,
@@ -574,6 +623,10 @@ export const scraperRouter = createRouter({
         const enrichedData = mergeScrapedAndEnrichedAnime(scrapedData, await enrichAnimeMetadata(scrapedData));
 
         const scrapedEpisodes = input.importEpisodes ? await provider.scrapeAnimeEpisodes(input.slug) : [];
+        if (input.importEpisodes && scrapedEpisodes.length === 0) {
+          return { success: false, error: `No episodes were found on ${input.source} for "${input.slug}".` };
+        }
+
         const persisted = await persistAnimeRecord({
           db,
           source: input.source,

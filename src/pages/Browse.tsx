@@ -3,8 +3,9 @@ import { useSearchParams } from "react-router";
 import { Link } from "react-router";
 import { motion } from "framer-motion";
 import { Search, Star, SlidersHorizontal, X, Play, Grid3X3, List } from "lucide-react";
-import { trpc } from "@/providers/trpc";
+import { trpc } from "@/lib/trpc";
 import AnimeArtwork from "@/components/AnimeArtwork";
+import MixedSynopsisText from "@/components/MixedSynopsisText";
 
 function normalizeAnimeSlug(slug?: string | null) {
   return (slug ?? "").replace(/^\/+|\/+$/g, "");
@@ -36,6 +37,7 @@ export default function Browse() {
   const categoryFilter = searchParams.get("category") || "";
   const statusFilter = searchParams.get("status") || "";
   const typeFilter = searchParams.get("type") || "";
+  const yearFilter = searchParams.get("year") || "";
   const [page, setPage] = useState(1);
 
   const { data: categories } = trpc.category.list.useQuery();
@@ -44,10 +46,18 @@ export default function Browse() {
     status: animeStatuses.has(statusFilter)
       ? (statusFilter as "ongoing" | "completed" | "upcoming")
       : undefined,
+    type: typeFilter
+      ? (typeFilter as "tv" | "movie" | "ova" | "special")
+      : undefined,
+    releaseYear: yearFilter ? Number(yearFilter) : undefined,
     search: searchQuery || undefined,
     page,
     limit: 24,
   });
+
+  const yearOptions = Array.from(
+    new Set((animeData?.items ?? []).map((item) => item.releaseYear).filter((value): value is number => value !== null)),
+  ).sort((a, b) => b - a);
 
   const updateFilter = (key: string, value: string) => {
     const newParams = new URLSearchParams(searchParams);
@@ -65,7 +75,7 @@ export default function Browse() {
     setPage(1);
   };
 
-  const hasFilters = searchQuery || categoryFilter || statusFilter || typeFilter;
+  const hasFilters = searchQuery || categoryFilter || statusFilter || typeFilter || yearFilter;
 
   return (
     <div className="min-h-screen bg-[#030209] pt-[150px] pb-16 px-4 sm:px-6 lg:px-8">
@@ -87,8 +97,8 @@ export default function Browse() {
         </motion.div>
 
         {/* Search & Filters Bar */}
-        <div className="flex flex-col lg:flex-row gap-4 mb-12">
-          <div className="relative flex-1 lg:max-w-4xl">
+        <div className="mb-12 flex flex-col gap-4 xl:flex-row xl:items-stretch">
+          <div className="relative flex-1">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#888888]" />
             <input
               type="text"
@@ -98,7 +108,7 @@ export default function Browse() {
               className="w-full pl-12 pr-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white placeholder:text-[#555555] focus:outline-none focus:border-[#693def] focus:ring-1 focus:ring-[#693def] transition-all shadow-xl"
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 self-end xl:self-auto">
             <button
               onClick={() => setFiltersOpen(!filtersOpen)}
               className={`flex items-center gap-3 px-6 py-3.5 rounded-2xl border transition-all duration-300 shadow-lg ${
@@ -111,7 +121,7 @@ export default function Browse() {
               <span className="text-sm font-bold">Filters</span>
               {hasFilters && (
                 <span className="w-5 h-5 rounded-full bg-[#693def] text-white text-[10px] font-bold flex items-center justify-center">
-                  {[categoryFilter, statusFilter, typeFilter].filter(Boolean).length}
+                  {[categoryFilter, statusFilter, typeFilter, yearFilter].filter(Boolean).length}
                 </span>
               )}
             </button>
@@ -140,7 +150,7 @@ export default function Browse() {
             exit={{ opacity: 0, height: 0 }}
             className="mb-8 p-6 rounded-xl bg-white/5 border border-white/10"
           >
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               <div>
                 <label className="block text-sm text-[#888888] mb-2">Category</label>
                 <select
@@ -178,6 +188,19 @@ export default function Browse() {
                   ))}
                 </select>
               </div>
+              <div>
+                <label className="block text-sm text-[#888888] mb-2">Year</label>
+                <select
+                  value={yearFilter}
+                  onChange={(e) => updateFilter("year", e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white focus:outline-none focus:border-[#693def]"
+                >
+                  <option value="">All Years</option>
+                  {yearOptions.map((year) => (
+                    <option key={year} value={year}>{year}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             {hasFilters && (
               <button
@@ -211,19 +234,16 @@ export default function Browse() {
                 transition={{ duration: 0.3, delay: i * 0.05 }}
               >
                 <Link to={`/anime/${normalizeAnimeSlug(a.slug)}`} className="group block">
-                  <div className="relative aspect-[16/10] rounded-2xl overflow-hidden mb-4 shadow-xl border border-white/5">
+                  <div className="relative aspect-[2/3] rounded-2xl overflow-hidden mb-4 shadow-xl border border-white/5 bg-white/[0.03]">
                     <AnimeArtwork
                       src={a.coverImage}
                       alt={a.title}
                       title={a.title}
                       className="w-full h-full"
-                      imageClassName="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                      imageClassName="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                       fallbackClassName="w-full h-full transition-transform duration-700 group-hover:scale-110"
                     />
                     <div className="absolute inset-0 card-overlay opacity-40 group-hover:opacity-70 transition-opacity duration-500" />
-                    <div className="absolute top-3 right-3 px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md text-[10px] font-bold text-white border border-white/10 tracking-wider">
-                      EP {a.episodesCount || "?"}
-                    </div>
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-500 scale-90 group-hover:scale-100">
                       <div className="w-14 h-14 rounded-full bg-[#693def]/90 flex items-center justify-center backdrop-blur-md shadow-[0_0_20px_rgba(105,61,239,0.5)]">
                         <Play className="w-6 h-6 text-white fill-white ml-1" />
@@ -234,12 +254,18 @@ export default function Browse() {
                     {a.title}
                   </h3>
                   <div className="flex items-center gap-2 mt-1.5 px-0.5">
-                    <span className="text-[11px] font-medium text-[#777777] uppercase tracking-wider">{a.categoryName}</span>
+                    <span className="text-[11px] font-medium text-[#777777] uppercase tracking-wider">{a.genreNames || a.categoryName}</span>
                     <span className="text-[#333333]">/</span>
                     <span className="flex items-center gap-1 text-[11px] font-bold text-yellow-500">
                       <Star className="w-3 h-3 fill-yellow-500" />
                       {a.score}
                     </span>
+                    {a.releaseYear && (
+                      <>
+                        <span className="text-[#333333]">/</span>
+                        <span className="text-[11px] font-medium text-[#777777]">{a.releaseYear}</span>
+                      </>
+                    )}
                   </div>
                 </Link>
               </motion.div>
@@ -255,7 +281,7 @@ export default function Browse() {
                 transition={{ duration: 0.3, delay: i * 0.05 }}
               >
                 <Link to={`/anime/${normalizeAnimeSlug(a.slug)}`} className="group flex gap-4 p-4 rounded-xl bg-white/5 border border-white/5 hover:border-[#693def]/30 transition-all">
-                  <div className="relative w-40 aspect-[16/10] rounded-lg overflow-hidden flex-shrink-0">
+                  <div className="relative w-28 sm:w-32 aspect-[2/3] rounded-lg overflow-hidden flex-shrink-0 bg-white/[0.03]">
                     <AnimeArtwork
                       src={a.coverImage}
                       alt={a.title}
@@ -270,12 +296,14 @@ export default function Browse() {
                       {a.title}
                     </h3>
                     {a.titleJp && <p className="text-sm text-[#8257f2] mb-2">{a.titleJp}</p>}
-                    <p className="text-sm text-[#888888] line-clamp-2 mb-3">{a.synopsis}</p>
+                    <MixedSynopsisText className="mb-3 line-clamp-2 text-sm text-[#888888]">
+                      {a.synopsis}
+                    </MixedSynopsisText>
                     <div className="flex items-center gap-3">
                       <span className="px-2 py-0.5 rounded-md bg-[#693def]/20 text-[#8257f2] text-xs font-medium">
                         {a.status}
                       </span>
-                      <span className="text-xs text-[#888888]">{a.categoryName}</span>
+                      <span className="text-xs text-[#888888]">{a.genreNames || a.categoryName}</span>
                       <span className="flex items-center gap-0.5 text-xs text-yellow-400">
                         <Star className="w-3 h-3 fill-yellow-400" />
                         {a.score}

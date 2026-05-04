@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router";
 import { motion } from "framer-motion";
 import {
   Shield, Users, Tv, Film, MessageSquare, Plus, Pencil, Trash2,
   X, Star, TrendingUp, Activity, ChevronRight, Search, BarChart3,
-  Layers, Save, Loader2, Download, RefreshCw, Globe, AlertCircle
+  Layers, Save, Loader2, Download, RefreshCw, Globe, AlertCircle, type LucideIcon
 } from "lucide-react";
-import { trpc } from "@/providers/trpc";
+import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import AnimeArtwork from "@/components/AnimeArtwork";
 import type { SourceSiteId } from "../../api/services/scraper/types";
@@ -18,6 +18,53 @@ type SourceSiteOption = {
   name: string;
   baseUrl: string;
   animePathHint: string;
+};
+
+type AdminAnime = {
+  id: number;
+  title: string;
+  titleJp?: string | null;
+  slug: string;
+  synopsis: string;
+  coverImage?: string | null;
+  bannerImage?: string | null;
+  status?: "ongoing" | "completed" | "upcoming" | null;
+  type?: "tv" | "movie" | "ova" | "special" | null;
+  rating?: string | null;
+  releaseYear?: number | null;
+  studio?: string | null;
+  score?: string | null;
+  episodesCount?: number | null;
+  duration?: number | null;
+  featured?: boolean | null;
+  categoryId?: number | null;
+  genreNames?: string;
+  categoryName?: string;
+};
+
+type AdminEpisode = {
+  id: number;
+  animeId: number;
+  number: number;
+  title?: string | null;
+  synopsis?: string | null;
+  thumbnail?: string | null;
+  videoUrl?: string | null;
+  duration?: number | null;
+  airDate?: string | Date | null;
+};
+
+type AdminCategory = {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string | null;
+};
+
+type LatestSourceAnime = {
+  slug: string;
+  title: string;
+  coverImage?: string | null;
 };
 
 function SourceSiteSelect({
@@ -45,7 +92,7 @@ function SourceSiteSelect({
 }
 
 /* ─── Stat Card ─── */
-function StatCard({ title, value, icon: Icon, color }: { title: string; value: number | string; icon: any; color: string }) {
+function StatCard({ title, value, icon: Icon, color }: { title: string; value: number | string; icon: LucideIcon; color: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -64,9 +111,26 @@ function StatCard({ title, value, icon: Icon, color }: { title: string; value: n
 }
 
 /* ─── Anime Form Modal ─── */
-function AnimeFormModal({ anime, onClose }: { anime?: any; onClose: () => void }) {
+function AnimeFormModal({ anime, onClose }: { anime?: AdminAnime; onClose: () => void }) {
   const utils = trpc.useUtils();
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{
+    title: string;
+    titleJp: string;
+    slug: string;
+    synopsis: string;
+    coverImage: string;
+    bannerImage: string;
+    status: NonNullable<AdminAnime["status"]>;
+    type: NonNullable<AdminAnime["type"]>;
+    rating: string;
+    releaseYear: number;
+    studio: string;
+    categoryId: number;
+    duration: number;
+    featured: boolean;
+    score: string;
+    episodesCount: number;
+  }>({
     title: anime?.title || "",
     titleJp: anime?.titleJp || "",
     slug: anime?.slug || "",
@@ -205,7 +269,7 @@ function AnimeFormModal({ anime, onClose }: { anime?: any; onClose: () => void }
               <label className="block text-sm text-[#888888] mb-1">Status</label>
               <select
                 value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
+                onChange={(e) => setForm({ ...form, status: e.target.value as NonNullable<AdminAnime["status"]> })}
                 className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-200 focus:outline-none focus:border-[#693def] text-sm placeholder:text-gray-500"
               >
                 <option value="ongoing">Ongoing</option>
@@ -217,7 +281,7 @@ function AnimeFormModal({ anime, onClose }: { anime?: any; onClose: () => void }
               <label className="block text-sm text-[#888888] mb-1">Type</label>
               <select
                 value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value })}
+                onChange={(e) => setForm({ ...form, type: e.target.value as NonNullable<AdminAnime["type"]> })}
                 className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-gray-200 focus:outline-none focus:border-[#693def] text-sm placeholder:text-gray-500"
               >
                 <option value="tv">TV</option>
@@ -327,7 +391,7 @@ function AnimeFormModal({ anime, onClose }: { anime?: any; onClose: () => void }
 }
 
 /* ─── Episode Form Modal ─── */
-function EpisodeFormModal({ animeId, episode, onClose }: { animeId: number; episode?: any; onClose: () => void }) {
+function EpisodeFormModal({ animeId, episode, onClose }: { animeId: number; episode?: AdminEpisode; onClose: () => void }) {
   const utils = trpc.useUtils();
   const [form, setForm] = useState({
     animeId,
@@ -472,7 +536,7 @@ function EpisodeFormModal({ animeId, episode, onClose }: { animeId: number; epis
 }
 
 /* ─── Category Form Modal ─── */
-function CategoryFormModal({ category, onClose }: { category?: any; onClose: () => void }) {
+function CategoryFormModal({ category, onClose }: { category?: AdminCategory; onClose: () => void }) {
   const utils = trpc.useUtils();
   const [form, setForm] = useState({
     name: category?.name || "",
@@ -751,7 +815,7 @@ function SyncEpisodesForm() {
 function LatestAnimeList() {
   const [source, setSource] = useState<SourceSiteId>("witanime");
   const [loading, setLoading] = useState(false);
-  const [animeList, setAnimeList] = useState<any[]>([]);
+  const [animeList, setAnimeList] = useState<LatestSourceAnime[]>([]);
   const [fetched, setFetched] = useState(false);
   const utils = trpc.useUtils();
   const { data: sources } = trpc.scraper.getSources.useQuery();
@@ -836,28 +900,28 @@ export default function Admin() {
   const [animeFormOpen, setAnimeFormOpen] = useState(false);
   const [episodeFormOpen, setEpisodeFormOpen] = useState(false);
   const [categoryFormOpen, setCategoryFormOpen] = useState(false);
-  const [editingAnime, setEditingAnime] = useState<any>(null);
-  const [editingEpisode, setEditingEpisode] = useState<any>(null);
-  const [editingCategory, setEditingCategory] = useState<any>(null);
+  const [editingAnime, setEditingAnime] = useState<AdminAnime | null>(null);
+  const [editingEpisode, setEditingEpisode] = useState<AdminEpisode | null>(null);
+  const [editingCategory, setEditingCategory] = useState<AdminCategory | null>(null);
   const [selectedAnimeId, setSelectedAnimeId] = useState<number>(1);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedAnimeIds, setSelectedAnimeIds] = useState<number[]>([]);
+  const [selectedEpisodeIds, setSelectedEpisodeIds] = useState<number[]>([]);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
 
   const { data: stats } = trpc.dashboard.stats.useQuery(undefined, { enabled: isAdmin });
   const { data: recentUsers } = trpc.dashboard.recentUsers.useQuery(undefined, { enabled: isAdmin });
   const { data: recentAnime } = trpc.dashboard.recentAnime.useQuery(undefined, { enabled: isAdmin });
   const { data: animeList } = trpc.anime.list.useQuery({ search: searchQuery || undefined, limit: 50 });
   const { data: categories } = trpc.category.list.useQuery();
-  const { data: episodeList } = trpc.episode.list.useQuery({ animeId: selectedAnimeId }, { enabled: !!selectedAnimeId });
-
-  useEffect(() => {
-    const firstAnimeId = animeList?.items[0]?.id;
-    if (!firstAnimeId) return;
-
-    const existsInCurrentList = animeList.items.some((item) => item.id === selectedAnimeId);
-    if (!selectedAnimeId || !existsInCurrentList) {
-      setSelectedAnimeId(firstAnimeId);
-    }
-  }, [animeList?.items, selectedAnimeId]);
+  const resolvedSelectedAnimeId =
+    animeList?.items.some((item) => item.id === selectedAnimeId)
+      ? selectedAnimeId
+      : (animeList?.items[0]?.id ?? 0);
+  const { data: episodeList } = trpc.episode.list.useQuery(
+    { animeId: resolvedSelectedAnimeId },
+    { enabled: resolvedSelectedAnimeId > 0 },
+  );
 
   const utils = trpc.useUtils();
   const deleteAnime = trpc.anime.delete.useMutation({
@@ -866,18 +930,95 @@ export default function Admin() {
       utils.dashboard.stats.invalidate();
     },
   });
+  const bulkDeleteAnime = trpc.anime.bulkDelete.useMutation({
+    onSuccess: () => {
+      setSelectedAnimeIds([]);
+      utils.anime.list.invalidate();
+      utils.dashboard.stats.invalidate();
+    },
+  });
   const deleteEpisode = trpc.episode.delete.useMutation({
     onSuccess: () => {
-      utils.episode.list.invalidate({ animeId: selectedAnimeId });
+      utils.episode.list.invalidate({ animeId: resolvedSelectedAnimeId });
+      utils.dashboard.stats.invalidate();
+    },
+  });
+  const bulkDeleteEpisode = trpc.episode.bulkDelete.useMutation({
+    onSuccess: () => {
+      setSelectedEpisodeIds([]);
+      utils.episode.list.invalidate({ animeId: resolvedSelectedAnimeId });
       utils.dashboard.stats.invalidate();
     },
   });
   const deleteCategory = trpc.category.delete.useMutation({
     onSuccess: () => {
       utils.category.list.invalidate();
+      utils.anime.list.invalidate();
       utils.dashboard.stats.invalidate();
     },
   });
+  const bulkDeleteCategory = trpc.category.bulkDelete.useMutation({
+    onSuccess: () => {
+      setSelectedCategoryIds([]);
+      utils.category.list.invalidate();
+      utils.anime.list.invalidate();
+      utils.dashboard.stats.invalidate();
+    },
+  });
+
+  const toggleSelection = (
+    id: number,
+    selectedIds: number[],
+    setSelectedIds: React.Dispatch<React.SetStateAction<number[]>>,
+  ) => {
+    setSelectedIds(
+      selectedIds.includes(id)
+        ? selectedIds.filter((value) => value !== id)
+        : [...selectedIds, id],
+    );
+  };
+
+  const toggleSelectAll = (
+    ids: number[],
+    selectedIds: number[],
+    setSelectedIds: React.Dispatch<React.SetStateAction<number[]>>,
+  ) => {
+    if (ids.length === 0) return;
+    const allSelected = ids.every((id) => selectedIds.includes(id));
+    setSelectedIds(
+      allSelected
+        ? selectedIds.filter((id) => !ids.includes(id))
+        : Array.from(new Set([...selectedIds, ...ids])),
+    );
+  };
+
+  const visibleAnimeIds = animeList?.items.map((item) => item.id) ?? [];
+  const visibleEpisodeIds = episodeList?.map((item) => item.id) ?? [];
+  const visibleCategoryIds = categories?.map((item) => item.id) ?? [];
+  const effectiveSelectedAnimeIds = selectedAnimeIds.filter((id) => visibleAnimeIds.includes(id));
+  const effectiveSelectedEpisodeIds = selectedEpisodeIds.filter((id) => visibleEpisodeIds.includes(id));
+  const effectiveSelectedCategoryIds = selectedCategoryIds.filter((id) => visibleCategoryIds.includes(id));
+  const allAnimeSelected = visibleAnimeIds.length > 0 && visibleAnimeIds.every((id) => effectiveSelectedAnimeIds.includes(id));
+  const allEpisodesSelected = visibleEpisodeIds.length > 0 && visibleEpisodeIds.every((id) => effectiveSelectedEpisodeIds.includes(id));
+  const allCategoriesSelected = visibleCategoryIds.length > 0 && visibleCategoryIds.every((id) => effectiveSelectedCategoryIds.includes(id));
+
+  const handleBulkAnimeDelete = () => {
+    if (effectiveSelectedAnimeIds.length === 0) return;
+    if (!confirm(`Delete ${effectiveSelectedAnimeIds.length} selected anime?`)) return;
+    bulkDeleteAnime.mutate({ ids: effectiveSelectedAnimeIds });
+  };
+
+  const handleBulkEpisodeDelete = () => {
+    if (effectiveSelectedEpisodeIds.length === 0) return;
+    if (!confirm(`Delete ${effectiveSelectedEpisodeIds.length} selected episodes?`)) return;
+    bulkDeleteEpisode.mutate({ ids: effectiveSelectedEpisodeIds });
+  };
+
+  const handleBulkCategoryDelete = () => {
+    if (effectiveSelectedCategoryIds.length === 0) return;
+    if (!confirm(`Delete ${effectiveSelectedCategoryIds.length} selected genres/categories?`)) return;
+    bulkDeleteCategory.mutate({ ids: effectiveSelectedCategoryIds });
+  };
 
   if (isLoading) {
     return (
@@ -900,7 +1041,7 @@ export default function Admin() {
     );
   }
 
-  const tabs: { key: Tab; label: string; icon: any }[] = [
+  const tabs: { key: Tab; label: string; icon: LucideIcon }[] = [
     { key: "overview", label: "Overview", icon: BarChart3 },
     { key: "anime", label: "Anime", icon: Tv },
     { key: "episodes", label: "Episodes", icon: Film },
@@ -1012,24 +1153,52 @@ export default function Admin() {
         {/* Anime Tab */}
         {activeTab === "anime" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <div className="flex items-center justify-between mb-6">
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#888888]" />
-                <input
+            <div className="flex flex-col gap-4 mb-6">
+              <div className="flex items-center justify-between gap-4">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#888888]" />
+                  <input
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setSelectedAnimeIds([]);
+                  }}
                   placeholder="Search anime..."
                   className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-[#888888] focus:outline-none focus:border-[#693def] text-sm"
                 />
+                </div>
+                <button
+                  onClick={() => { setEditingAnime(null); setAnimeFormOpen(true); }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#693def] text-white text-sm font-medium hover:bg-[#8257f2] transition-all ml-4"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Anime
+                </button>
               </div>
-              <button
-                onClick={() => { setEditingAnime(null); setAnimeFormOpen(true); }}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#693def] text-white text-sm font-medium hover:bg-[#8257f2] transition-all ml-4"
-              >
-                <Plus className="w-4 h-4" />
-                Add Anime
-              </button>
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                <label className="flex items-center gap-2 text-sm text-white">
+                  <input
+                    type="checkbox"
+                    checked={allAnimeSelected}
+                    onChange={() => toggleSelectAll(visibleAnimeIds, selectedAnimeIds, setSelectedAnimeIds)}
+                    className="h-4 w-4 accent-[#693def]"
+                  />
+                  Select all visible
+                </label>
+                <span className="text-sm text-[#888888]">
+                  {effectiveSelectedAnimeIds.length} selected
+                </span>
+                <button
+                  onClick={handleBulkAnimeDelete}
+                  disabled={effectiveSelectedAnimeIds.length === 0 || bulkDeleteAnime.isPending}
+                  className="flex items-center gap-2 rounded-lg bg-red-500/15 px-3 py-2 text-sm text-red-300 transition-all hover:bg-red-500/25 disabled:opacity-50"
+                >
+                  {bulkDeleteAnime.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <Trash2 className="w-4 h-4" />
+                  Delete Selected
+                </button>
+              </div>
             </div>
 
             <div className="glass-panel overflow-hidden">
@@ -1037,6 +1206,14 @@ export default function Admin() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-white/5">
+                      <th className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={allAnimeSelected}
+                          onChange={() => toggleSelectAll(visibleAnimeIds, selectedAnimeIds, setSelectedAnimeIds)}
+                          className="h-4 w-4 accent-[#693def]"
+                        />
+                      </th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-[#888888] uppercase">Anime</th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-[#888888] uppercase">Status</th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-[#888888] uppercase">Score</th>
@@ -1049,6 +1226,14 @@ export default function Admin() {
                     {animeList?.items.map((a) => (
                       <tr key={a.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                         <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedAnimeIds.includes(a.id)}
+                            onChange={() => toggleSelection(a.id, selectedAnimeIds, setSelectedAnimeIds)}
+                            className="h-4 w-4 accent-[#693def]"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <AnimeArtwork
                               src={a.coverImage}
@@ -1060,7 +1245,7 @@ export default function Admin() {
                             />
                             <div>
                               <p className="text-sm font-medium text-white">{a.title}</p>
-                              <p className="text-xs text-[#888888]">{a.categoryName}</p>
+                              <p className="text-xs text-[#888888]">{a.genreNames || a.categoryName}</p>
                             </div>
                           </div>
                         </td>
@@ -1109,23 +1294,51 @@ export default function Admin() {
         {/* Episodes Tab */}
         {activeTab === "episodes" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-              <select
-                value={selectedAnimeId}
-                onChange={(e) => setSelectedAnimeId(Number(e.target.value))}
-                className="px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-gray-200 focus:outline-none focus:border-[#693def] text-sm placeholder:text-gray-500"
-              >
-                {animeList?.items.map((a) => (
-                  <option key={a.id} value={a.id}>{a.title}</option>
-                ))}
-              </select>
-              <button
-                onClick={() => { setEditingEpisode(null); setEpisodeFormOpen(true); }}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#693def] text-white text-sm font-medium hover:bg-[#8257f2] transition-all"
-              >
-                <Plus className="w-4 h-4" />
-                Add Episode
-              </button>
+            <div className="flex flex-col gap-4 mb-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <select
+                  value={resolvedSelectedAnimeId}
+                  onChange={(e) => {
+                    setSelectedAnimeId(Number(e.target.value));
+                    setSelectedEpisodeIds([]);
+                  }}
+                  className="px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-gray-200 focus:outline-none focus:border-[#693def] text-sm placeholder:text-gray-500"
+                >
+                  {animeList?.items.map((a) => (
+                    <option key={a.id} value={a.id}>{a.title}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => { setEditingEpisode(null); setEpisodeFormOpen(true); }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#693def] text-white text-sm font-medium hover:bg-[#8257f2] transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Episode
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                <label className="flex items-center gap-2 text-sm text-white">
+                  <input
+                    type="checkbox"
+                    checked={allEpisodesSelected}
+                    onChange={() => toggleSelectAll(visibleEpisodeIds, selectedEpisodeIds, setSelectedEpisodeIds)}
+                    className="h-4 w-4 accent-[#693def]"
+                  />
+                  Select all visible
+                </label>
+                <span className="text-sm text-[#888888]">
+                  {effectiveSelectedEpisodeIds.length} selected
+                </span>
+                <button
+                  onClick={handleBulkEpisodeDelete}
+                  disabled={effectiveSelectedEpisodeIds.length === 0 || bulkDeleteEpisode.isPending}
+                  className="flex items-center gap-2 rounded-lg bg-red-500/15 px-3 py-2 text-sm text-red-300 transition-all hover:bg-red-500/25 disabled:opacity-50"
+                >
+                  {bulkDeleteEpisode.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <Trash2 className="w-4 h-4" />
+                  Delete Selected
+                </button>
+              </div>
             </div>
 
             <div className="glass-panel overflow-hidden">
@@ -1133,6 +1346,14 @@ export default function Admin() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-white/5">
+                      <th className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={allEpisodesSelected}
+                          onChange={() => toggleSelectAll(visibleEpisodeIds, selectedEpisodeIds, setSelectedEpisodeIds)}
+                          className="h-4 w-4 accent-[#693def]"
+                        />
+                      </th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-[#888888] uppercase">#</th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-[#888888] uppercase">Title</th>
                       <th className="text-left px-4 py-3 text-xs font-semibold text-[#888888] uppercase">Duration</th>
@@ -1143,6 +1364,14 @@ export default function Admin() {
                   <tbody>
                     {episodeList?.map((ep) => (
                       <tr key={ep.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedEpisodeIds.includes(ep.id)}
+                            onChange={() => toggleSelection(ep.id, selectedEpisodeIds, setSelectedEpisodeIds)}
+                            className="h-4 w-4 accent-[#693def]"
+                          />
+                        </td>
                         <td className="px-4 py-3 text-sm text-[#693def] font-mono font-bold">{ep.number}</td>
                         <td className="px-4 py-3">
                           <p className="text-sm text-white">{ep.title || `Episode ${ep.number}`}</p>
@@ -1182,22 +1411,55 @@ export default function Admin() {
         {/* Categories Tab */}
         {activeTab === "categories" && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold text-white">Categories ({categories?.length || 0})</h2>
-              <button
-                onClick={() => { setEditingCategory(null); setCategoryFormOpen(true); }}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#693def] text-white text-sm font-medium hover:bg-[#8257f2] transition-all"
-              >
-                <Plus className="w-4 h-4" />
-                Add Category
-              </button>
+            <div className="flex flex-col gap-4 mb-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold text-white">Categories ({categories?.length || 0})</h2>
+                <button
+                  onClick={() => { setEditingCategory(null); setCategoryFormOpen(true); }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[#693def] text-white text-sm font-medium hover:bg-[#8257f2] transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Category
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                <label className="flex items-center gap-2 text-sm text-white">
+                  <input
+                    type="checkbox"
+                    checked={allCategoriesSelected}
+                    onChange={() => toggleSelectAll(visibleCategoryIds, selectedCategoryIds, setSelectedCategoryIds)}
+                    className="h-4 w-4 accent-[#693def]"
+                  />
+                  Select all visible
+                </label>
+                <span className="text-sm text-[#888888]">
+                  {effectiveSelectedCategoryIds.length} selected
+                </span>
+                <button
+                  onClick={handleBulkCategoryDelete}
+                  disabled={effectiveSelectedCategoryIds.length === 0 || bulkDeleteCategory.isPending}
+                  className="flex items-center gap-2 rounded-lg bg-red-500/15 px-3 py-2 text-sm text-red-300 transition-all hover:bg-red-500/25 disabled:opacity-50"
+                >
+                  {bulkDeleteCategory.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <Trash2 className="w-4 h-4" />
+                  Delete Selected
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {categories?.map((cat) => (
                 <div key={cat.id} className="glass-panel p-4 group">
                   <div className="flex items-start justify-between mb-2">
-                    <h3 className="text-lg font-semibold text-white">{cat.name}</h3>
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedCategoryIds.includes(cat.id)}
+                        onChange={() => toggleSelection(cat.id, selectedCategoryIds, setSelectedCategoryIds)}
+                        className="mt-1 h-4 w-4 accent-[#693def]"
+                      />
+                      <h3 className="text-lg font-semibold text-white">{cat.name}</h3>
+                    </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => { setEditingCategory(cat); setCategoryFormOpen(true); }}
@@ -1267,20 +1529,20 @@ export default function Admin() {
       {/* Modals */}
       {animeFormOpen && (
         <AnimeFormModal
-          anime={editingAnime}
+          anime={editingAnime ?? undefined}
           onClose={() => { setAnimeFormOpen(false); setEditingAnime(null); }}
         />
       )}
       {episodeFormOpen && (
         <EpisodeFormModal
-          animeId={selectedAnimeId}
-          episode={editingEpisode}
+          animeId={resolvedSelectedAnimeId}
+          episode={editingEpisode ?? undefined}
           onClose={() => { setEpisodeFormOpen(false); setEditingEpisode(null); }}
         />
       )}
       {categoryFormOpen && (
         <CategoryFormModal
-          category={editingCategory}
+          category={editingCategory ?? undefined}
           onClose={() => { setCategoryFormOpen(false); setEditingCategory(null); }}
         />
       )}
