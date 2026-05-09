@@ -4,9 +4,18 @@ import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { env } from "./lib/env";
 import { enforceTrustedMutationOrigin } from "./lib/origin";
+import { getFirstZodErrorMessage } from "./lib/validation-errors";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
+  errorFormatter({ shape, error }) {
+    const validationMessage = getFirstZodErrorMessage(error.cause);
+
+    return {
+      ...shape,
+      message: validationMessage ?? shape.message,
+    };
+  },
 });
 
 export const createRouter = t.router;

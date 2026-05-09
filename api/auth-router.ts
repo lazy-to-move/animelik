@@ -15,12 +15,22 @@ import { verifyGoogleCredential } from "./google-auth";
 import { enforceRateLimit, getRequestClientKey } from "./lib/rate-limit";
 
 const authCredentialsSchema = z.object({
-  email: z.string().email().max(320),
-  password: z.string().min(8).max(72),
+  email: z
+    .string()
+    .email("Enter a valid email address.")
+    .max(320, "Email addresses must be 320 characters or less."),
+  password: z
+    .string()
+    .min(8, "Use at least 8 characters for your password.")
+    .max(72, "Passwords must be 72 characters or less."),
 });
 
 const signUpSchema = authCredentialsSchema.extend({
-  name: z.string().trim().min(2).max(60),
+  name: z
+    .string()
+    .trim()
+    .min(2, "Use at least 2 characters for your name.")
+    .max(60, "Names must be 60 characters or less."),
 });
 
 const googleSignInSchema = z.object({
