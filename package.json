@@ -15,6 +15,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:migrate:deploy": "node db/migrate.mjs",
+    "db:copy:content": "node db/copy-content.mjs",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
