@@ -30,12 +30,12 @@ app.use("*", async (c, next) => {
   c.header("X-Frame-Options", "SAMEORIGIN");
   c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
 });
-app.get("/healthz", (c) => c.json({ ok: true, ts: Date.now() }));
-app.get("/robots.txt", (c) => {
+app.get("/healthz", c => c.json({ ok: true, ts: Date.now() }));
+app.get("/robots.txt", c => {
   const origin = new URL(c.req.url).origin;
   return c.text(`User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n`);
 });
-app.get("/sitemap.xml", async (c) => {
+app.get("/sitemap.xml", async c => {
   const origin = new URL(c.req.url).origin;
   const db = getDb();
   const animeRows = await db
@@ -52,17 +52,20 @@ app.get("/sitemap.xml", async (c) => {
     { loc: `${origin}/browse`, lastmod: undefined },
     { loc: `${origin}/schedule`, lastmod: undefined },
   ];
-  const animeEntries = animeRows.map((row) => ({
+  const animeEntries = animeRows.map(row => ({
     loc: `${origin}/anime/${row.slug.replace(/^\/+|\/+$/g, "")}`,
     lastmod: row.updatedAt?.toISOString(),
   }));
 
   const entries = [...staticEntries, ...animeEntries];
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n` +
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
     entries
-      .map((entry) => {
-        const lastmodTag = entry.lastmod ? `\n    <lastmod>${escapeXml(entry.lastmod)}</lastmod>` : "";
+      .map(entry => {
+        const lastmodTag = entry.lastmod
+          ? `\n    <lastmod>${escapeXml(entry.lastmod)}</lastmod>`
+          : "";
         return `  <url>\n    <loc>${escapeXml(entry.loc)}</loc>${lastmodTag}\n  </url>`;
       })
       .join("\n") +
@@ -71,7 +74,7 @@ app.get("/sitemap.xml", async (c) => {
   c.header("Content-Type", "application/xml; charset=utf-8");
   return c.body(xml);
 });
-app.use("/api/trpc/*", async (c) => {
+app.use("/api/trpc/*", async c => {
   if (!isTrustedMutationOrigin(c.req.raw, env.siteUrl)) {
     return c.json({ error: "Untrusted request origin." }, 403);
   }
@@ -82,7 +85,7 @@ app.use("/api/trpc/*", async (c) => {
     createContext,
   });
 });
-app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
+app.all("/api/*", c => c.json({ error: "Not Found" }, 404));
 
 export default app;
 
@@ -94,7 +97,7 @@ if (env.isProduction) {
   startScheduler(6 * 60 * 60 * 1000);
 
   const port = parseInt(process.env.PORT || "3000");
-  serve({ fetch: app.fetch, port }, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+  serve({ fetch: app.fetch, port, hostname: "0.0.0.0" }, () => {
+    console.log(`Server running on http://0.0.0.0:${port}/`);
   });
 }

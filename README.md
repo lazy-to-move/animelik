@@ -110,28 +110,50 @@ If your database is running on the host machine instead of inside the same Docke
 
 The Docker image now includes the Linux libraries Puppeteer needs for scraping, bundles the runtime-downloaded `public/anime-covers` assets, and keeps the Puppeteer browser cache inside the app image.
 
-## Railway Deployment
+## Render Deployment
 
-Railway is the recommended host for this project because it fits the current architecture well:
+Render is a strong fit for this project because it supports:
 
 - long-running Node web service
-- PostgreSQL service in the same project
-- Dockerfile-based deploy
-- background scraper scheduler support
+- PostgreSQL in the same Blueprint
+- Dockerfile-based deploys
+- a persistent disk for runtime-downloaded posters
+- background scraper scheduler support on an always-on web service
 
-The repository includes [railway.toml](</C:/Users/Expert Gaming/Downloads/projects/Kimi_Agent_Full-Stack Anime Streaming Site/app/railway.toml>) with:
+The repository includes [render.yaml](</C:/Users/Expert Gaming/Downloads/projects/Kimi_Agent_Full-Stack Anime Streaming Site/app/render.yaml>) with:
 
-- Dockerfile builds
-- `npm run db:migrate` as a pre-deploy step
+- a Docker web service
+- `npm run db:migrate:deploy` as a pre-deploy step
 - `/healthz` healthcheck
+- a 5 GB persistent disk mounted for imported poster storage
+- a managed Render Postgres database
 
-After authenticating the Railway CLI, the typical flow is:
+To deploy from the Render Dashboard:
 
-```powershell
-npx @railway/cli init
-npx @railway/cli deploy -t postgres
-npx @railway/cli up
-```
+1. Connect your GitHub account to Render.
+2. Open [https://dashboard.render.com/blueprints](https://dashboard.render.com/blueprints).
+3. Create a new Blueprint from this repo.
+4. Fill in any prompted secrets, especially:
+   - `SITE_URL`
+   - `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` if using Google sign-in
+   - `OWNER_UNION_ID` if you want to auto-promote a first owner
+5. Deploy the Blueprint.
+
+The current Blueprint uses Render's smallest always-on web service (`starter`) and smallest paid durable Postgres plan (`basic-256mb`) because:
+
+- free web services can sleep, which is bad for the scraper scheduler
+- free Postgres expires after 30 days
+- persistent disks are for paid services
+
+### Deploy to Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/wizard404error/synx-anime-site)
+
+If you keep the GitHub repo private, Render's GitHub app must have access to it.
+
+## Railway Deployment
+
+Railway remains a good alternative if you prefer it. The repository also includes [railway.toml](</C:/Users/Expert Gaming/Downloads/projects/Kimi_Agent_Full-Stack Anime Streaming Site/app/railway.toml>) with Dockerfile builds, a healthcheck, and the safer runtime migration step.
 
 ## Admin Workflow
 
