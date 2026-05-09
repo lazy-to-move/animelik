@@ -8,6 +8,9 @@ type AnimeArtworkProps = {
   className?: string;
   imageClassName?: string;
   fallbackClassName?: string;
+  loading?: "lazy" | "eager";
+  decoding?: "async" | "sync" | "auto";
+  fetchPriority?: "high" | "low" | "auto";
 };
 
 function getInitials(title?: string | null): string {
@@ -30,6 +33,9 @@ export default function AnimeArtwork({
   className = "",
   imageClassName = "",
   fallbackClassName = "",
+  loading = "lazy",
+  decoding = "async",
+  fetchPriority = "auto",
 }: AnimeArtworkProps) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const hasError = Boolean(src && failedSrc === src);
@@ -40,6 +46,9 @@ export default function AnimeArtwork({
         key={src}
         src={src}
         alt={alt}
+        loading={loading}
+        decoding={decoding}
+        fetchPriority={fetchPriority}
         className={`${className} ${imageClassName}`.trim()}
         onError={() => setFailedSrc(src)}
       />

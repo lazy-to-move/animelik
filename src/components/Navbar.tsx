@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { Search, Bookmark, User, LogOut, Menu, X, Shield, Tv, ChevronDown } from "lucide-react";
+import { Search, Bookmark, User, LogOut, Menu, X, Shield, Tv, ChevronDown, Settings } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function Navbar() {
@@ -32,6 +32,19 @@ export default function Navbar() {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, []);
 
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSearchOpen(false);
+        setProfileOpen(false);
+        setMobileOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, []);
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
@@ -50,6 +63,7 @@ export default function Navbar() {
 
   return (
     <nav
+      aria-label="Primary"
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
         scrolled || isWatchPage ? "glass-nav py-3" : "bg-transparent py-6"
       }`}
@@ -57,7 +71,7 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-3 group">
+          <Link to="/" aria-label="Go to Synx home page" className="flex items-center gap-3 group">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#693def] to-[#8257f2] flex items-center justify-center transition-all duration-300 ease-out group-hover:scale-110 group-hover:rotate-3 group-hover:shadow-[0_0_30px_rgba(105,61,239,0.5)] shadow-[0_0_20px_rgba(105,61,239,0.3)]">
               <Tv className="w-5.5 h-5.5 text-white" />
             </div>
@@ -82,6 +96,7 @@ export default function Navbar() {
                     ? "text-white bg-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]"
                     : "text-[#aaaaaa] hover:text-white hover:bg-white/5"
                 }`}
+                aria-current={location.pathname === link.path ? "page" : undefined}
               >
                 {link.label}
                 {location.pathname === link.path && (
@@ -119,6 +134,7 @@ export default function Navbar() {
                 setProfileOpen(false);
                 setMobileOpen(false);
               }}
+              aria-label={searchOpen ? "Close search" : "Open search"}
               className="p-2.5 rounded-full text-[#cccccc] hover:text-white hover:bg-white/10 transition-all duration-300 ease-out hover:scale-105 active:scale-95"
             >
               <Search className="w-5 h-5" />
@@ -129,6 +145,7 @@ export default function Navbar() {
               <div className="flex items-center gap-2">
               <Link
                   to="/watchlist"
+                  aria-label="Open watchlist"
                   className="hidden md:flex p-2.5 rounded-full text-[#cccccc] hover:text-white hover:bg-white/10 transition-all duration-300 ease-out hover:scale-105 active:scale-95"
                 >
                   <Bookmark className="w-5 h-5" />
@@ -141,6 +158,9 @@ export default function Navbar() {
                       setSearchOpen(false);
                       setMobileOpen(false);
                     }}
+                    aria-expanded={profileOpen}
+                    aria-haspopup="menu"
+                    aria-label="Open account menu"
                     className={`flex items-center gap-2 rounded-full border px-1.5 py-1.5 pr-2.5 transition-all duration-300 ease-out ${
                       profileOpen
                         ? "bg-white/12 border-white/20 shadow-[0_10px_32px_rgba(0,0,0,0.28)]"
@@ -177,6 +197,14 @@ export default function Navbar() {
                         {user.email || ""}
                       </p>
                     </div>
+                    <Link
+                      to="/settings"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-[#d7d1ee] transition-colors hover:bg-white/6 hover:text-white"
+                    >
+                      <Settings className="w-4 h-4" />
+                      Settings
+                    </Link>
                     <button
                       type="button"
                       onClick={() => {
@@ -214,6 +242,9 @@ export default function Navbar() {
                 setSearchOpen(false);
                 setProfileOpen(false);
               }}
+              aria-expanded={mobileOpen}
+              aria-controls="mobile-navigation"
+              aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"}
               className={`${isWatchPage ? "lg:hidden" : "md:hidden"} p-2.5 rounded-full text-[#cccccc] hover:text-white hover:bg-white/10 transition-all duration-300 ease-out hover:scale-105 active:scale-95`}
             >
               {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -226,14 +257,19 @@ export default function Navbar() {
       {searchOpen && (
         <div className="absolute top-full left-0 right-0 glass-nav p-4 animate-in fade-in slide-in-from-top-2 duration-200">
           <form onSubmit={handleSearch} className="max-w-xl mx-auto">
+            <label htmlFor="nav-search" className="sr-only">
+              Search anime by title
+            </label>
             <div className="relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#888888]" />
               <input
+                id="nav-search"
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search anime by title..."
                 autoFocus
+                aria-label="Search anime by title"
                 className="w-full pl-12 pr-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-[#888888] focus:outline-none focus:border-[#693def] focus:ring-1 focus:ring-[#693def] transition-all"
               />
             </div>
@@ -243,12 +279,16 @@ export default function Navbar() {
 
       {/* Mobile Menu */}
       {mobileOpen && (
-        <div className={`${isWatchPage ? "lg:hidden" : "md:hidden"} absolute top-full left-0 right-0 glass-panel m-4 p-4 animate-in fade-in slide-in-from-top-2 duration-200`}>
+        <div
+          id="mobile-navigation"
+          className={`${isWatchPage ? "lg:hidden" : "md:hidden"} absolute top-full left-0 right-0 glass-panel m-4 p-4 animate-in fade-in slide-in-from-top-2 duration-200`}
+        >
           <div className="flex flex-col gap-1">
             {navLinks.map((link) => (
               <Link
                 key={link.path}
                 to={link.path}
+                aria-current={location.pathname === link.path ? "page" : undefined}
                 className={`px-4 py-3 rounded-xl text-sm font-medium transition-all ${
                   location.pathname === link.path
                     ? "text-white bg-white/10"
@@ -268,16 +308,25 @@ export default function Navbar() {
               </Link>
             )}
             {user && (
-              <button
-                onClick={() => {
-                  setMobileOpen(false);
-                  logout();
-                }}
-                className="px-4 py-3 rounded-xl text-sm font-medium text-[#cccccc] hover:text-white hover:bg-white/5 transition-all flex items-center gap-2 text-left"
-              >
-                <LogOut className="w-4 h-4" />
-                Sign Out
-              </button>
+              <>
+                <Link
+                  to="/settings"
+                  className="px-4 py-3 rounded-xl text-sm font-medium text-[#cccccc] hover:text-white hover:bg-white/5 transition-all flex items-center gap-2 text-left"
+                >
+                  <Settings className="w-4 h-4" />
+                  Settings
+                </Link>
+                <button
+                  onClick={() => {
+                    setMobileOpen(false);
+                    logout();
+                  }}
+                  className="px-4 py-3 rounded-xl text-sm font-medium text-[#cccccc] hover:text-white hover:bg-white/5 transition-all flex items-center gap-2 text-left"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sign Out
+                </button>
+              </>
             )}
           </div>
         </div>

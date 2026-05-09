@@ -11,11 +11,19 @@ const Watch = lazy(() => import("./pages/Watch"));
 const Watchlist = lazy(() => import("./pages/Watchlist"));
 const Admin = lazy(() => import("./pages/Admin"));
 const Login = lazy(() => import("./pages/Login"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Privacy = lazy(() => import("./pages/Privacy"));
+const Terms = lazy(() => import("./pages/Terms"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function RouteFallback() {
   return (
-    <div className="flex min-h-[60vh] items-center justify-center">
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading page"
+      className="flex min-h-[60vh] items-center justify-center"
+    >
       <div className="h-10 w-10 rounded-full border-2 border-[#693def] border-t-transparent animate-spin" />
     </div>
   );
@@ -71,6 +79,10 @@ function RouteMetadata() {
       title = "Your Watchlist | Synx Anime";
       description = "Manage saved anime, progress tracking, and watch status in your personal Synx watchlist.";
       robots = "noindex,nofollow";
+    } else if (path === "/settings") {
+      title = "Account Settings | Synx Anime";
+      description = "Review your Synx Anime account details, admin access, and session controls.";
+      robots = "noindex,nofollow";
     } else if (path === "/login" || path === "/signup") {
       title = path === "/signup" ? "Create Account | Synx Anime" : "Sign In | Synx Anime";
       description = "Sign in to Synx Anime or create an account to manage watchlists, reviews, and viewing progress.";
@@ -79,6 +91,12 @@ function RouteMetadata() {
       title = "Admin Dashboard | Synx Anime";
       description = "Manage anime, episodes, categories, schedules, and source imports in the Synx admin dashboard.";
       robots = "noindex,nofollow";
+    } else if (path === "/privacy") {
+      title = "Privacy Policy | Synx Anime";
+      description = "Read how Synx Anime handles account data, cookies, watchlists, and operational logs.";
+    } else if (path === "/terms") {
+      title = "Terms of Service | Synx Anime";
+      description = "Review the platform terms, acceptable use rules, and content responsibilities for Synx Anime.";
     } else {
       title = "Page Not Found | Synx Anime";
       description = "The page you requested could not be found on Synx Anime.";
@@ -105,23 +123,34 @@ export default function App() {
   const isAuthRoute = location.pathname === "/login" || location.pathname === "/signup";
 
   return (
-    <div className="min-h-screen bg-[#030209]">
+    <div className="flex min-h-screen flex-col bg-[#030209]">
       <RouteMetadata />
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-full focus:bg-[#693def] focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white focus:shadow-[0_12px_40px_rgba(105,61,239,0.45)]"
+      >
+        Skip to content
+      </a>
       {!isAuthRoute && <Navbar />}
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/browse" element={<Browse />} />
-          <Route path="/schedule" element={<Schedule />} />
-          <Route path="/anime/:slug" element={<AnimeDetail />} />
-          <Route path="/watch/:slug/:episodeNum" element={<Watch />} />
-          <Route path="/watchlist" element={<Watchlist />} />
-          <Route path="/admin" element={<Admin />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Login />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Suspense>
+      <main id="main-content" tabIndex={-1} className="flex-1 outline-none">
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/browse" element={<Browse />} />
+            <Route path="/schedule" element={<Schedule />} />
+            <Route path="/anime/:slug" element={<AnimeDetail />} />
+            <Route path="/watch/:slug/:episodeNum" element={<Watch />} />
+            <Route path="/watchlist" element={<Watchlist />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/admin" element={<Admin />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Login />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+      </main>
       {!isAuthRoute && <Footer />}
     </div>
   );

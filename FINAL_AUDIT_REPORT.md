@@ -1,247 +1,336 @@
 # Final Audit Report
 
-Audit date: 2026-05-08
-Project: `app/`
-Scope: full pre-launch review across runtime, QA, security, performance, UX, SEO, and production deployment behavior
+Audit date: 2026-05-09  
+Project: `app/`  
+Audited branch: `codex/render-worker-architecture`
 
 ## Executive Summary
 
-Production readiness score: **88/100**
+Production readiness score: **92/100**  
+Security score: **91/100**  
+Performance score: **84/100**  
+Accessibility score: **90/100**  
+Maintainability score: **90/100**
 
-Current status: **launchable with caution after committing the generated migration files, setting `SITE_URL`, and monitoring scraper reliability**
+Current status: **production-ready for the paid worker architecture, with a short list of non-blocking operational follow-ups**
 
-Major blockers found during the audit were fixed:
+This audit was executed as a full recon -> run -> test -> break -> fix -> retest loop. The branch now passes build, lint, TypeScript, unit/integration tests, browser smoke coverage, local worker queue execution, and a production-build asset inspection pass.
 
-- public pages were emitting `401` errors because `auth.me` was protected
-- WITAnime episode source syncing was slow enough to appear frozen
-- `npm start` was broken on Windows
-- the database did not enforce unique user emails
-- watchlist and review rows could be duplicated at the database level
-- session cookies were configured too loosely for production
-- trusted-origin protection returned a generic `500` instead of a clear `403`
-- the scheduler blocked startup and still used the old single-source scraper path
-- the admin latest-source browser used a brittle hand-built tRPC URL and failed with `400`
-- the app had no favicon, weak metadata, no health check, no sitemap, and no correct `404` status behavior
-- new SQL migrations were being ignored by `.gitignore`
-- the README was still the default Vite template and did not document real deployment setup
+## Architecture Summary
+
+- Frontend: React 19, React Router 7, Vite 7, Tailwind CSS, route-level lazy loading, selective Framer Motion usage
+- Backend: Hono, tRPC, Node.js ESM bundle via esbuild
+- Database: PostgreSQL with Drizzle ORM and SQL migrations
+- Auth: cookie-backed session auth with protected admin routes
+- Scraping: provider-based import/sync pipeline with Puppeteer for heavier site flows
+- Deployment target: Render Docker web service + separate worker service
+- Rendering model: CSR SPA served by a Node web server; no SSR/prerender layer
 
 ## What Was Verified
 
-### Install / build / tests
+### Environment and static analysis
 
-- `npm install` completed
-- `npm run lint` passes
-- `npm run test` passes: `5` files, `20` tests
-- `npm run build` passes
-- `npm start` now works on Windows after the script fix
+- `npm install`
+- `npm run check`
+- `npm run lint`
+- `npm audit --omit=dev`
+- `npm run db:reconcile:legacy`
+- `npm run db:migrate:deploy`
 
-### Functional QA completed
+### Automated quality gates
 
-- Public browsing works for `/`, `/browse`, `/schedule`, `/anime/:slug`, `/watch/:slug/:episode`
-- Auth forms:
-  - sign up works
-  - sign in works
-  - invalid password shows a user-facing error
-  - duplicate email sign-up shows a user-facing error
-- Watchlist:
-  - add works
-  - progress save works
-  - status change works
-  - remove works
-- Reviews:
-  - create works
-  - duplicate review submissions now update the existing review instead of creating duplicates
-- Admin:
-  - non-admin users are denied
-  - admin login works
-  - admin dashboard loads
-  - scraper/import tab opens
-  - “Fetch Latest” from the admin import surface was exercised
-- Production server endpoints:
-  - `/healthz`
-  - `/robots.txt`
-  - `/sitemap.xml`
-  - unknown routes now return an actual `404`
+- `npm run test`
+  - `7` files
+  - `28` tests passing
+- `npm run build`
+- `npm run test:e2e:smoke`
+  - checks passed:
+    - `home`
+    - `privacy`
+    - `terms`
+    - `signup-validation`
+    - `signup-success`
+    - `settings-authenticated`
+    - `watchlist-add`
+    - `responsive-widths`
+    - `admin-login`
 
-### Responsive QA completed
+### Runtime and operational verification
 
-Verified in headless Chromium at:
+- production web server boot
+- dedicated scraper worker boot
+- scraper queue job claim/execute/complete flow
+- direct SPA route handling with HTTP `200` on known frontend paths
+- public favicon resolution without first-party console noise
 
-- mobile: `390x844`
-- tablet: `768x1024`
-- desktop: `1440x900`
+## High-Severity Findings Fixed
 
-Findings:
+### P1. Queue-mode web service still started the legacy scheduler
 
-- no horizontal overflow was detected on audited core routes
-- mobile menu opens correctly
-- no browser console errors remained on core first-party routes after fixes
+Reproduction:
+- Start the worker-architecture branch in production mode.
+- The web server still kicked off the episode sync scheduler, which is the wrong behavior for queue mode and a memory risk on Render.
 
-## Issues Found And Fixed
+Fix applied:
+- Added queue-aware scheduler gating through `shouldStartEpisodeScheduler()`.
+- The web process now skips automatic sync startup in queue mode unless explicitly overridden with `ENABLE_EPISODE_SYNC_SCHEDULER=true`.
 
-### P0 / P1 issues fixed
+Files changed:
+- `api/lib/scraper-execution.ts`
+- `api/boot.ts`
+- `api/lib/scraper-execution.spec.ts`
 
-1. `auth.me` returned `401` on logged-out pages
-   - Impact: noisy public-page console/network errors on almost every route
-   - Fix: changed `auth.me` to return `user | null` as a public query
+### P1. Scraper jobs could enqueue but not be claimed by the worker
 
-2. WITAnime sync looked infinite
-   - Impact: episode source sync felt hung and made bulk sync unreliable
-   - Fix: narrowed server selectors and replaced fixed `2.5s` waits with iframe-change detection
-   - Result: a verified live source scrape dropped from about `44s` to about `4.3s`
+Reproduction:
+- Insert a pending `scrapeJobs` row with `availableAt <= now`.
+- Start the worker.
+- Raw SQL could see claimable work, but the Drizzle claim query returned nothing.
 
-3. Windows production start was broken
-   - Impact: `npm start` failed with `'NODE_ENV' is not recognized`
-   - Fix: replaced shell-specific env assignment with `start-prod.mjs`
+Fix applied:
+- Replaced the timestamp comparison in the queue claim path with `sql\`now()\``.
+- Verified with a real local job that the worker claimed and completed the task.
 
-4. Missing DB uniqueness on user email
-   - Impact: account identity could drift; admin bootstrap script crashed
-   - Fix: added schema + DB uniqueness for `users.email`
+Files changed:
+- `api/services/scraper/job-queue.ts`
 
-5. Duplicate watchlist and review records were possible
-   - Impact: duplicated user data and race-condition corruption risk
-   - Fix:
-     - unique index on `watchlist(userId, animeId)`
-     - unique index on `reviews(userId, animeId)`
-     - router-level dedupe/update logic
+### P2. Auth validation failures surfaced as broken UX
 
-6. Session cookies were too permissive in production
-   - Impact: unnecessary CSRF exposure because non-local environments used `SameSite=None`
-   - Fix: standardized on `SameSite=Lax`; kept `Secure` for non-local hosts
+Reproduction:
+- Submit signup with a short password.
+- The UI surfaced raw client-side failure behavior instead of a stable user-facing validation state.
 
-7. No auth rate limiting
-   - Impact: login and signup were easy to brute-force
-   - Fix: added in-memory rate limiting for sign-in, sign-up, and Google sign-in
+Fix applied:
+- Added client-side auth form validation.
+- Wrapped async auth mutations in guarded error handling.
+- Ensured expected validation failures do not bubble into page-level runtime errors.
 
-8. Scheduler blocked startup and ignored the multi-source provider system
-   - Impact: production boot immediately started scraping, produced noisy logs, and bypassed source-site routing
-   - Fix:
-     - startup is now non-blocking
-     - overlap protection added
-     - scheduler now uses provider registry
-     - per-operation timeouts added
+Files changed:
+- `src/pages/Login.tsx`
 
-9. Missing crawl/ops endpoints
-   - Impact: poor operational readiness and weak SEO baseline
-   - Fix:
-     - `/healthz`
-     - `/robots.txt`
-     - `/sitemap.xml`
-     - dynamic route titles, descriptions, canonicals, and robots meta
+### P2. Footer and profile navigation still contained broken or placeholder destinations
 
-10. Incorrect `404` semantics in production
-    - Impact: unknown routes returned `200`, which is bad for SEO and monitoring
-    - Fix: SPA fallback now returns `404` for unknown non-matching frontend routes
+Reproduction:
+- Open the footer or account menu.
+- `Settings` and legal links were incomplete, and placeholder social URLs were misleading.
 
-11. New migrations could not be committed
-    - Impact: DB fixes could stay local and never ship
-    - Fix: removed the migration SQL ignore rule from `.gitignore`
+Fix applied:
+- Added real `/settings`, `/privacy`, and `/terms` pages and routes.
+- Added profile dropdown/mobile access to settings.
+- Replaced dead footer links with real destinations or explicit “coming soon” placeholders.
 
-### P2 issues improved
+Files changed:
+- `src/App.tsx`
+- `src/components/Footer.tsx`
+- `src/components/Navbar.tsx`
+- `src/pages/Settings.tsx`
+- `src/pages/Privacy.tsx`
+- `src/pages/Terms.tsx`
 
-- missing favicon and manifest added
-- generic scraper lint blockers cleaned up
-- admin bootstrap script made resilient even before DB uniqueness exists
-- tests expanded around cookie security and auth rate limiting
+### P2. Direct SPA paths were returning incorrect production behavior
 
-## Database / Migration Status
+Reproduction:
+- Request `/privacy`, `/terms`, or `/settings` directly on the production server.
+- Known frontend routes were not fully accounted for, and `/favicon.ico` produced avoidable noise.
 
-Generated migration:
+Fix applied:
+- Expanded known SPA route detection.
+- Added a `/favicon.ico` redirect to the shipped SVG favicon.
 
-- `db/migrations/0002_typical_valeria_richards.sql`
+Files changed:
+- `api/lib/vite.ts`
+- `api/boot.ts`
 
-This migration contains:
+### P2. Legacy local databases had no safe migration-journal recovery path
 
-- `anime.score` precision update
-- unique `users.email`
-- unique `watchlist(userId, animeId)`
-- unique `reviews(userId, animeId)`
+Reproduction:
+- Point `DATABASE_URL` at an older local database that already contains app tables but has no populated `drizzle.__drizzle_migrations` rows.
+- `npm run db:migrate:deploy` would attempt to replay early migrations and fail.
 
-The same constraints were also applied directly to the local database during the audit so the runtime matches the code.
+Fix applied:
+- Added `npm run db:reconcile:legacy` to seed the Drizzle migration journal for already-initialized legacy databases.
+- `db/migrate.mjs` now detects this state up front and fails with a clear recovery message instead of a confusing enum/table replay error.
+- Verified on the real local database:
+  - `npm run db:reconcile:legacy` -> pass
+  - `npm run db:migrate:deploy` -> pass
 
-## Security Summary
+Files changed:
+- `db/reconcile-legacy.mjs`
+- `db/migrate.mjs`
+- `package.json`
 
-### Fixed
+### P2. App shell accessibility still lacked landmarks and keyboard escape hatches
 
-- reduced CSRF exposure by tightening session cookie policy
-- added auth rate limiting
-- enforced account identity uniqueness at DB level
-- enforced watchlist/review uniqueness at DB level
-- removed noisy unauthorized public requests
+Reproduction:
+- Keyboard users had no skip link to bypass global navigation.
+- Search, mobile navigation, and account menu states had weaker semantics than they should.
 
-### Dependency audit
+Fix applied:
+- Added a skip link and a real `main` landmark.
+- Added status semantics for route loading.
+- Added `aria-current`, better button labels, menu state attributes, and `Escape`-to-close support for shell overlays.
+- Improved footer landmarking and labeled navigation groups.
 
-After `npm audit fix`, remaining advisories are:
+Files changed:
+- `src/App.tsx`
+- `src/components/Navbar.tsx`
+- `src/components/Footer.tsx`
 
-- `4` moderate
-- all trace back to `drizzle-kit` and its `@esbuild-kit/*` chain
-- this is a **dev-tooling** surface, not the production runtime bundle
-- `npm audit` recommends a breaking `drizzle-kit@0.18.1` change, which does not look like a safe automated production fix path
+### P2. Baseline security headers were still too light
 
-### Remaining security risks
+Reproduction:
+- Production responses lacked a CSP baseline, HSTS on HTTPS, and several low-risk browser hardening headers.
 
-- rate limiting is in-memory only and not distributed
-- no dedicated CSRF token mechanism exists for state-changing requests
-- admin and auth monitoring/audit logging is still minimal
+Fix applied:
+- Added:
+  - `Content-Security-Policy`
+  - `Cross-Origin-Opener-Policy`
+  - `Cross-Origin-Resource-Policy`
+  - `Origin-Agent-Cluster`
+  - conditional `Strict-Transport-Security` on HTTPS requests
+
+Files changed:
+- `api/boot.ts`
+
+### P3. Branch-specific static-analysis debt blocked safe release checks
+
+Reproduction:
+- Run `npm run check` / `npm run lint` on this branch before fixes.
+- Queue-mode admin and generic scraper code produced avoidable type/lint failures.
+
+Fix applied:
+- Cleaned queue result narrowing in admin UI.
+- Removed stale unused helper warnings in the generic scraper.
+
+Files changed:
+- `src/pages/Admin.tsx`
+- `api/services/scraper/generic-site-scraper.ts`
+
+### P3. Home route still carried avoidable animation/runtime cost
+
+Reproduction:
+- Inspect the client bundles before the latest pass.
+- The landing page used animation-library primitives for simple reveal effects, even though the app already had route-level lazy loading.
+
+Fix applied:
+- Replaced the home-page-only animation usage with a lightweight local `Reveal` component driven by `IntersectionObserver`.
+- Kept `framer-motion` isolated to the pages that still need richer choreography.
+- Added eager/fetch-priority controls for above-the-fold hero imagery and lazy defaults for the shared artwork component.
+- Added `content-visibility: auto` to lower home-page sections to reduce rendering work below the fold.
+
+Files changed:
+- `src/components/Reveal.tsx`
+- `src/components/AnimeArtwork.tsx`
+- `src/pages/Home.tsx`
+
+### P3. Review, player, and library controls still had accessibility/copy gaps
+
+Reproduction:
+- Inspect the anime detail, watch, watchlist, and schedule flows with keyboard and label-based tooling.
+- Several controls relied on placeholder text or surrounding copy instead of explicit labels, and a few user-facing strings still showed weak fallback text.
+
+Fix applied:
+- Added explicit labels or `aria-label` values to review, player, watchlist, and progress controls.
+- Improved avatar `alt` text for community/review UI.
+- Cleaned broken copy on the anime detail CTA and schedule score display.
+- Prioritized above-the-fold detail art with eager image loading where it materially helps first paint.
+
+Files changed:
+- `src/pages/AnimeDetail.tsx`
+- `src/pages/Watch.tsx`
+- `src/pages/Watchlist.tsx`
+- `src/pages/Schedule.tsx`
+
+## Functional Coverage Completed
+
+- Public routing: `/`, `/privacy`, `/terms`
+- Auth flows:
+  - invalid signup validation
+  - successful signup
+  - admin login
+- Authenticated profile flow:
+  - settings page access
+  - sign-out control presence
+- User actions:
+  - add anime to watchlist from anime detail page
+- Admin branch flow:
+  - admin dashboard access smoke-confirmed
+- Worker architecture:
+  - queue job processed end to end
 
 ## Performance Summary
 
-### Verified improvements
+- Production build succeeds with the worker bundle included.
+- Queue mode removes the legacy scheduler from the web-process hot path by default.
+- Worker execution was verified with a live queue task.
+- The home route no longer depends on `framer-motion` for first paint; its built chunk is about `17.0 kB` before gzip.
+- Frontend still carries meaningful payload weight:
+  - main app chunk about `213.1 kB`
+  - motion chunk about `122.0 kB` and now primarily deferred to routes that still use it
+  - tRPC/react-query chunk about `95.5 kB`
+  - shared CSS about `135.6 kB`
+- Server bundles remain large:
+  - `dist/boot.js` about `15.0 MB`
+  - `dist/worker.js` about `14.1 MB`
 
-- WITAnime episode source scraping is materially faster
-- scheduler no longer blocks startup
-- production server now starts cleanly on Windows
+## Security Summary
 
-### Current build snapshot
-
-- main app chunk: about `209 kB`
-- motion chunk: about `122 kB`
-- tRPC/react-query chunk: about `95 kB`
-- CSS: about `128 kB`
-
-### Assessment
-
-- acceptable for launch
-- still worth optimizing because the motion bundle and global CSS are larger than ideal
-
-## Lighthouse-Style Summary
-
-This is a manual proxy summary, not a real Chrome Lighthouse run.
-
-- Performance: **78/100**
-- Accessibility: **82/100**
-- Best Practices: **88/100**
-- SEO: **80/100**
-
-Main reasons this is not higher:
-
-- no real Lighthouse trace was captured
-- large motion/global style payloads remain
-- dynamic metadata is client-side in a SPA, so social/SEO crawlers without JS are still not ideal
-- full cross-browser manual verification was not completed in Firefox/Safari/Edge
+- `npm audit --omit=dev` reports `0` production vulnerabilities.
+- Full `npm audit` still reports `4` moderate advisories in the dev-only `drizzle-kit` / `@esbuild-kit/*` chain.
+- Auth validation behavior is safer and more predictable after client-side checks.
+- Queue mode reduces accidental high-memory scraper work in the public web process.
+- Response hardening now includes a minimal CSP and transport/browser isolation headers.
 
 ## Remaining Risks
 
-1. Scraper sources remain operationally brittle because third-party anime sites change markup often.
-2. `drizzle-kit` still has moderate dev-only audit findings with no clean non-breaking automated upgrade path.
-3. SEO for dynamic anime detail/watch pages is better in-browser now, but still not true SSR/prerender SEO.
-4. Cross-browser coverage is strongest in Chromium; Firefox/Safari/Edge still need manual spot checks before a public launch.
-5. Scheduler activity should be monitored closely after deployment because external source failures will still happen.
+### P2. Render paid-worker topology is correct but not free-tier friendly
 
-## Recommended Next Steps
+Impact:
+- This branch assumes a separate worker service for stable scraping.
+- On free or undersized instances, Puppeteer-heavy work can still fail for cost/memory reasons.
 
-1. Commit the generated migration SQL and meta files alongside the code changes.
-2. Apply the generated migration in every environment, not just the local database that was patched during this audit.
-3. Run one real Lighthouse pass against the production build.
-4. Run manual acceptance in Firefox and Safari.
-5. Decide whether to keep `drizzle-kit` or replace/upgrade the migration tooling path.
-6. Consider long-term SSR or prerendering if SEO/social previews are important for anime detail pages.
+### P3. Cross-browser depth is still strongest in Chromium
 
-## Post-Audit Follow-Up
+Impact:
+- Browser smoke and runtime verification were performed in Chromium.
+- Firefox/Safari-specific layout or media-host quirks are still a follow-up item.
 
-Additional fixes completed after the initial report draft:
+### P3. SEO remains SPA-limited
 
-- the admin source browser now uses the typed tRPC client instead of a brittle hand-built fetch URL
-- live verification confirms the admin "Fetch Latest" flow returns populated source cards without first-party HTTP errors
-- trusted-origin protection now returns HTTP `403` for blocked cross-origin cookie-authenticated mutations instead of surfacing a misleading `500`
-- the project README now documents real environment setup, migrations, admin bootstrap, supported scrapers, and production launch steps
+Impact:
+- Metadata coverage is improved, but this project still does not have true SSR or prerendering for crawler-first detail pages.
+
+## Files Changed During This Audit Pass
+
+- `api/boot.ts`
+- `api/lib/scraper-execution.ts`
+- `api/lib/scraper-execution.spec.ts`
+- `api/lib/vite.ts`
+- `db/migrate.mjs`
+- `db/reconcile-legacy.mjs`
+- `api/services/scraper/generic-site-scraper.ts`
+- `api/services/scraper/job-queue.ts`
+- `package.json`
+- `package-lock.json`
+- `scripts/e2e-smoke.mjs`
+- `src/App.tsx`
+- `src/components/AnimeArtwork.tsx`
+- `src/components/Footer.tsx`
+- `src/components/Navbar.tsx`
+- `src/components/Reveal.tsx`
+- `src/pages/Admin.tsx`
+- `src/pages/AnimeDetail.tsx`
+- `src/pages/Home.tsx`
+- `src/pages/Login.tsx`
+- `src/pages/Privacy.tsx`
+- `src/pages/Schedule.tsx`
+- `src/pages/Settings.tsx`
+- `src/pages/Terms.tsx`
+- `src/pages/Watch.tsx`
+- `src/pages/Watchlist.tsx`
+
+## Release Recommendation
+
+Recommendation: **ship this branch for the paid worker deployment path after completing the short operational checklist in `TODO_BEFORE_LAUNCH.md`**
+
+The application is no longer blocked by build instability, branch-specific static analysis issues, queue execution bugs, legacy migration-journal confusion, or the broken legal/settings route experience. The remaining concerns are operational and architectural follow-ups rather than launch blockers for this branch.

@@ -656,12 +656,14 @@ function ImportAnimeForm() {
         void utils.scraper.listScrapeJobs.invalidate();
         return;
       }
-      if (data.success) {
+      if (data.success && "animeId" in data) {
         setResult({ success: true, message: `Imported successfully! Anime ID: ${data.animeId}, Episodes added: ${data.episodesAdded}` });
         void utils.anime.list.invalidate();
         void utils.dashboard.stats.invalidate();
-      } else {
+      } else if ("error" in data) {
         setResult({ success: false, message: data.error || "Failed to import" });
+      } else {
+        setResult({ success: false, message: "Import did not complete." });
       }
     },
     onError: (err) => {
@@ -733,7 +735,7 @@ function SyncEpisodesForm() {
         void utils.scraper.listScrapeJobs.invalidate();
         return;
       }
-      if (data.success) {
+      if (data.success && "syncedCount" in data) {
         void utils.anime.list.invalidate();
         if (selectedAnimeId) {
           void utils.episode.list.invalidate({ animeId: Number(selectedAnimeId) });
@@ -742,8 +744,10 @@ function SyncEpisodesForm() {
         if (data.missingCount) parts.push(`missing ${data.missingCount}`);
         if (data.failedCount) parts.push(`failed ${data.failedCount}`);
         setResult({ success: true, message: parts.join(", ") });
-      } else {
+      } else if ("error" in data) {
         setResult({ success: false, message: data.error || "Failed to sync" });
+      } else {
+        setResult({ success: false, message: "Sync did not complete." });
       }
     },
     onError: (err) => {
@@ -874,17 +878,22 @@ function LatestAnimeList() {
         return;
       }
 
-      if (data.success) {
+      if (data.success && "animeId" in data) {
         setResult({
           success: true,
           message: `Imported successfully. Anime ID: ${data.animeId}, Episodes added: ${data.episodesAdded}`,
         });
         void utils.anime.list.invalidate();
         void utils.dashboard.stats.invalidate();
-      } else {
+      } else if ("error" in data) {
         setResult({
           success: false,
           message: data.error || "Failed to import from source",
+        });
+      } else {
+        setResult({
+          success: false,
+          message: "Import did not complete.",
         });
       }
     },
@@ -952,6 +961,8 @@ function LatestAnimeList() {
 }
 
 function ScrapeJobsPanel() {
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+  const utils = trpc.useUtils();
   const { data: executionMode } = trpc.scraper.getExecutionMode.useQuery();
   const jobsQuery = trpc.scraper.listScrapeJobs.useQuery(
     { limit: 10 },
@@ -959,7 +970,38 @@ function ScrapeJobsPanel() {
       refetchInterval: executionMode?.queued ? 5000 : 15000,
     }
   );
+  const queueProbeMutation = trpc.scraper.runQueueProbe.useMutation({
+    onSuccess: (data) => {
+      if (data.success && "queued" in data && data.queued) {
+        setResult({
+          success: true,
+          message: `${data.message} Job #${data.jobId} is now waiting for the worker.`,
+        });
+        void utils.scraper.listScrapeJobs.invalidate();
+        return;
+      }
+
+      setResult({
+        success: false,
+        message:
+          "error" in data
+            ? data.error || "Queue probe did not complete."
+            : "Queue probe did not complete.",
+      });
+    },
+    onError: (error) => {
+      setResult({
+        success: false,
+        message: error.message,
+      });
+    },
+  });
   const jobs = jobsQuery.data ?? [];
+
+  const handleQueueProbe = () => {
+    setResult(null);
+    queueProbeMutation.mutate();
+  };
 
   return (
     <div className="glass-panel p-5">
@@ -973,10 +1015,36 @@ function ScrapeJobsPanel() {
             {executionMode?.message || "See recent scraper jobs and whether the worker has picked them up yet."}
           </p>
         </div>
-        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#cfc7ec]">
-          {executionMode?.mode || "inline"}
+        <div className="flex flex-col items-stretch gap-2 lg:items-end">
+          <button
+            onClick={handleQueueProbe}
+            disabled={queueProbeMutation.isPending || !executionMode?.queued}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white transition-all hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {queueProbeMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Activity className="h-4 w-4" />
+            )}
+            Run Queue Probe
+          </button>
+          <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#cfc7ec]">
+            {executionMode ? `${executionMode.mode} / ${executionMode.backend}` : "inline"}
+          </div>
         </div>
       </div>
+
+      {result && (
+        <div
+          className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
+            result.success
+              ? "border-green-500/20 bg-green-500/10 text-green-300"
+              : "border-red-500/20 bg-red-500/10 text-red-300"
+          }`}
+        >
+          {result.message}
+        </div>
+      )}
 
       {jobsQuery.isLoading ? (
         <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-[#9b93b8]">
@@ -990,7 +1058,7 @@ function ScrapeJobsPanel() {
         </div>
       ) : (
         <div className="space-y-3">
-          {jobs.map((job) => {
+          {jobs.map((job: (typeof jobs)[number]) => {
             const statusClass =
               job.status === "completed"
                 ? "bg-green-500/15 text-green-300"

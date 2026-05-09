@@ -1,4 +1,5 @@
 /* eslint-disable no-irregular-whitespace */
+import { load, type CheerioAPI } from "cheerio";
 import puppeteer, { Browser, Page } from "puppeteer";
 import type { ScraperAnime, ScraperEpisode, SourceSiteId, VideoSource } from "./types";
 import { getPuppeteerLaunchOptions } from "./puppeteer-launch";
@@ -11,6 +12,12 @@ export interface GenericSiteConfig {
   animePathSegment?: string;
   episodePathSegment?: string;
   searchUrls?: ((query: string) => string)[];
+  titleSelectors?: string[];
+  synopsisSelectors?: string[];
+  coverImageSelectors?: string[];
+  ratingSelectors?: string[];
+  paginationMode?: "anchors" | "rel-next" | "anchors-and-rel-next";
+  isEpisodeUrl?: (absoluteHref: string, animeSlug: string) => boolean;
 }
 
 interface StructuredAnimeData {
@@ -25,6 +32,12 @@ interface StructuredAnimeData {
 }
 
 const browserCache = new Map<string, Browser>();
+const HTML_FETCH_TIMEOUT_MS = 30_000;
+const HTML_FETCH_HEADERS = {
+  "user-agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+  "accept-language": "en-US,en;q=0.9,ar;q=0.8",
+};
 
 async function getBrowser(cacheKey: string): Promise<Browser> {
   const existing = browserCache.get(cacheKey);
@@ -75,6 +88,52 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&amp;/gi, "&")
     .replace(/&#x2F;/gi, "/")
     .replace(/&#47;/gi, "/");
+}
+
+function safeDecodeUrlComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function extractBackgroundImageUrl(styleValue: string | undefined): string | undefined {
+  if (!styleValue) return undefined;
+  const match = styleValue.match(/background-image\s*:\s*url\((['"]?)(.+?)\1\)/i);
+  return match?.[2]?.trim() || undefined;
+}
+
+function getTitleSelectors(config: GenericSiteConfig): string[] {
+  return config.titleSelectors ?? ["h1", ".anime-details-title", ".anime-title", ".PostTitle", "[class*='title']"];
+}
+
+function getSynopsisSelectors(config: GenericSiteConfig): string[] {
+  return (
+    config.synopsisSelectors ?? [".content", "p.anime-story", "[class*='synopsis']", "[class*='description']", ".story", ".StoryArea p", ".StoryArea", ".anime-story", ".entry-content p"]
+  );
+}
+
+function getCoverImageSelectors(config: GenericSiteConfig): string[] {
+  return (
+    config.coverImageSelectors ?? [
+      ".InnerPoster img",
+      ".Poster img",
+      ".singleCover .BG",
+      'img[class*="poster"]',
+      ".posters img",
+      ".anime-header img",
+      '[class*="poster"] img',
+      ".wp-post-image",
+      ".attachment-post-thumbnail",
+      ".anime-thumbnail img",
+      ".thumb img",
+    ]
+  );
+}
+
+function getRatingSelectors(config: GenericSiteConfig): string[] {
+  return config.ratingSelectors ?? [".imdbRBox span", "[class*='rating']", ".anime-rating", ".score", "[class*='score']"];
 }
 
 function unwrapProviderUrl(url: string | undefined): string | undefined {
@@ -224,17 +283,18 @@ async function safeNavigate(page: Page, url: string, retries = 3): Promise<boole
 function extractSlugFromUrl(url: string, pathSegment: string): string | null {
   const normalizedSegment = pathSegment.endsWith("/") ? pathSegment : `${pathSegment}/`;
   const [, slug = ""] = url.split(normalizedSegment);
-  return slug.replace(/\/$/, "") || null;
+  const normalizedSlug = safeDecodeUrlComponent(slug.replace(/\/$/, ""));
+  return normalizedSlug || null;
 }
 
 function extractEpisodeIdFromUrl(url: string, pathSegment: string): string | null {
   const normalizedSegment = pathSegment.endsWith("/") ? pathSegment : `${pathSegment}/`;
   const [, id = ""] = url.split(normalizedSegment);
-  return id.replace(/\/$/, "") || null;
+  const normalizedId = safeDecodeUrlComponent(id.replace(/\/$/, ""));
+  return normalizedId || null;
 }
 
 // Legacy helper kept temporarily while the robust parser is the active path.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function extractEpisodeNumber(text: string, href?: string): number | null {
   const explicitMatch =
     text.match(/(?:episode|ep|الحلقة)\s*[-:]?\s*(\d{1,4})/i) ||
@@ -260,7 +320,6 @@ function extractEpisodeNumber(text: string, href?: string): number | null {
 }
 
 // Legacy helper kept temporarily while the robust parser is the active path.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function looksLikeEpisodeLink(text: string, href: string, episodePathSegment: string): boolean {
   if (!href) return false;
   const loweredText = text.toLowerCase();
@@ -274,6 +333,9 @@ function looksLikeEpisodeLink(text: string, href: string, episodePathSegment: st
     loweredText.includes("ep ")
   );
 }
+
+void extractEpisodeNumber;
+void looksLikeEpisodeLink;
 
 function safeDecodeEpisodeHref(value: string): string {
   try {
@@ -328,6 +390,10 @@ function deriveEpisodeId(absoluteHref: string, episodePathSegment: string): stri
 }
 
 function looksLikeAnimeEpisodeUrl(config: GenericSiteConfig, animeSlug: string, absoluteHref: string): boolean {
+  if (config.isEpisodeUrl) {
+    return config.isEpisodeUrl(absoluteHref, animeSlug);
+  }
+
   const normalizedHref = absoluteHref.toLowerCase();
   const normalizedSlug = animeSlug.toLowerCase();
   const normalizedSlugCore = config.id === 'anime4up'
@@ -400,14 +466,25 @@ function cleanSynopsisText(value: string): string {
     .trim();
 }
 
-async function extractCoverImage(page: Page, baseUrl: string): Promise<string | undefined> {
+async function extractCoverImageWithSelectors(
+  page: Page,
+  baseUrl: string,
+  selectors: string[],
+): Promise<string | undefined> {
   const selectorCover = await page
     .$eval(
-      'img[class*="poster"], .posters img, .anime-header img, [class*="poster"] img, .wp-post-image, .attachment-post-thumbnail, .anime-thumbnail img, .thumb img',
-      (el) => el.getAttribute("src") || el.getAttribute("data-src") || el.getAttribute("data-lazy-src") || "",
+      selectors.join(", "),
+      (el) =>
+        el.getAttribute("src") ||
+        el.getAttribute("data-src") ||
+        el.getAttribute("data-lazy-src") ||
+        el.getAttribute("style") ||
+        "",
     )
     .catch(() => "");
 
+  const backgroundCover = extractBackgroundImageUrl(selectorCover);
+  if (backgroundCover) return normalizeAbsoluteUrl(baseUrl, backgroundCover);
   if (selectorCover) return normalizeAbsoluteUrl(baseUrl, selectorCover);
 
   const ogImage = await page.$eval('meta[property="og:image"]', (el) => el.getAttribute("content") || "").catch(() => "");
@@ -497,23 +574,389 @@ async function extractEpisodeAnchorsFromPage(page: Page): Promise<ScrapedEpisode
 }
 
 async function extractAnimePaginationUrls(page: Page, config: GenericSiteConfig, animeSlug: string): Promise<string[]> {
+  const paginationMode = config.paginationMode ?? "anchors";
   const animePathSegment = config.animePathSegment ?? "/anime/";
   const expectedPrefix = `${config.baseUrl}${animePathSegment}${animeSlug}/page/`.toLowerCase();
+  const urls = new Set<string>();
 
-  const rawLinks = await page.$$eval("a[href]", (anchors) =>
-    anchors.map((anchor) => anchor.getAttribute("href") || "").filter(Boolean),
-  ).catch(() => []);
+  if (paginationMode === "anchors" || paginationMode === "anchors-and-rel-next") {
+    const rawLinks = await page.$$eval("a[href]", (anchors) =>
+      anchors.map((anchor) => anchor.getAttribute("href") || "").filter(Boolean),
+    ).catch(() => []);
 
-  const urls = rawLinks
-    .map((href) => normalizeAbsoluteUrl(config.baseUrl, href))
-    .filter((href): href is string => Boolean(href))
-    .filter((href) => href.toLowerCase().startsWith(expectedPrefix))
-    .filter((href) => /\/page\/\d+\/?$/i.test(href));
+    for (const href of rawLinks) {
+      const normalized = normalizeAbsoluteUrl(config.baseUrl, href);
+      if (!normalized) continue;
+      if (!normalized.toLowerCase().startsWith(expectedPrefix)) continue;
+      if (!/\/page\/\d+\/?$/i.test(normalized)) continue;
+      urls.add(normalized);
+    }
+  }
 
-  return Array.from(new Set(urls));
+  if (paginationMode === "rel-next" || paginationMode === "anchors-and-rel-next") {
+    const relNext = await page.$eval("link[rel='next']", (el) => el.getAttribute("href") || "").catch(() => "");
+    const normalized = normalizeAbsoluteUrl(config.baseUrl, relNext);
+    if (normalized && /\/page\/\d+\/?$/i.test(normalized)) {
+      urls.add(normalized);
+    }
+  }
+
+  return Array.from(urls);
+}
+
+async function fetchHtmlDocument(url: string): Promise<CheerioAPI> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), HTML_FETCH_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      headers: HTML_FETCH_HEADERS,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} while fetching ${url}`);
+    }
+
+    return load(await response.text());
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractMetaContent($: CheerioAPI, selector: string): string {
+  return $(selector).attr("content")?.trim() || "";
+}
+
+function extractFirstText($: CheerioAPI, selectors: string[]): string {
+  for (const selector of selectors) {
+    const text = $(selector).first().text().trim();
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function extractStructuredAnimeDataFromHtml($: CheerioAPI, baseUrl: string): StructuredAnimeData {
+  const scripts = $('script[type="application/ld+json"]')
+    .map((_, node) => $(node).text().trim())
+    .get()
+    .filter(Boolean);
+
+  for (const scriptText of scripts) {
+    try {
+      const parsed = JSON.parse(scriptText);
+      const candidates = Array.isArray(parsed)
+        ? parsed
+        : parsed?.["@graph"] && Array.isArray(parsed["@graph"])
+          ? parsed["@graph"]
+          : [parsed];
+
+      for (const candidate of candidates) {
+        const type = String(candidate?.["@type"] ?? "");
+        if (!/(TVSeries|Movie|Series|AnimeSeries)/i.test(type)) continue;
+
+        const imageValue = typeof candidate?.image === "string"
+          ? candidate.image
+          : typeof candidate?.image?.url === "string"
+            ? candidate.image.url
+            : undefined;
+        const genres = Array.isArray(candidate?.genre)
+          ? candidate.genre.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+          : typeof candidate?.genre === "string"
+            ? [candidate.genre]
+            : [];
+        const ratingValue =
+          typeof candidate?.aggregateRating?.ratingValue === "string" ||
+          typeof candidate?.aggregateRating?.ratingValue === "number"
+            ? String(candidate.aggregateRating.ratingValue)
+            : undefined;
+        const yearMatch = String(candidate?.datePublished ?? "").match(/(\d{4})/);
+
+        return {
+          title: typeof candidate?.name === "string" ? candidate.name.trim() : undefined,
+          alternateTitle: typeof candidate?.alternateName === "string" ? candidate.alternateName.trim() : undefined,
+          description: typeof candidate?.description === "string" ? candidate.description.trim() : undefined,
+          image: normalizeAbsoluteUrl(baseUrl, imageValue),
+          episodesCount: Number.isFinite(Number(candidate?.numberOfEpisodes)) ? Number(candidate.numberOfEpisodes) : undefined,
+          genres,
+          rating: ratingValue ? `${ratingValue} / 10` : undefined,
+          year: yearMatch ? Number.parseInt(yearMatch[1], 10) : undefined,
+        };
+      }
+    } catch {
+      // Ignore malformed structured data blocks
+    }
+  }
+
+  return {};
+}
+
+function extractCoverImageFromHtmlWithSelectors(
+  $: CheerioAPI,
+  baseUrl: string,
+  selectors: string[],
+): string | undefined {
+  const node = $(selectors.join(", ")).first();
+  const selectorCover =
+    node.attr("src") ||
+    node.attr("data-src") ||
+    node.attr("data-lazy-src") ||
+    extractBackgroundImageUrl(node.attr("style")) ||
+    "";
+
+  if (selectorCover) return normalizeAbsoluteUrl(baseUrl, selectorCover);
+
+  const ogImage = extractMetaContent($, 'meta[property="og:image"]');
+  if (ogImage) return normalizeAbsoluteUrl(baseUrl, ogImage);
+
+  return undefined;
+}
+
+function extractEpisodeAnchorsFromHtml($: CheerioAPI): ScrapedEpisodeAnchor[] {
+  return $("a")
+    .map((index, anchor) => {
+      const anchorNode = $(anchor);
+      const parentScope = anchorNode.find("img").length > 0
+        ? anchorNode
+        : anchorNode.parents("li, article, .episodes-card-container, [class*='episode']").first();
+      const parentImage = parentScope.find("img").first();
+
+      return {
+        index,
+        title: anchorNode.text().trim(),
+        imageText: parentImage.attr("alt")?.trim() ?? "",
+        thumbnail: parentImage.attr("src") ?? parentImage.attr("data-src") ?? "",
+        onclick: anchorNode.attr("onclick") ?? "",
+        href: anchorNode.attr("href") ?? "",
+      };
+    })
+    .get();
+}
+
+function extractAnimePaginationUrlsFromHtml($: CheerioAPI, config: GenericSiteConfig, animeSlug: string): string[] {
+  const paginationMode = config.paginationMode ?? "anchors";
+  const animePathSegment = config.animePathSegment ?? "/anime/";
+  const expectedPrefix = `${config.baseUrl}${animePathSegment}${animeSlug}/page/`.toLowerCase();
+  const urls = new Set<string>();
+
+  if (paginationMode === "anchors" || paginationMode === "anchors-and-rel-next") {
+    $("a[href]")
+      .map((_, anchor) => $(anchor).attr("href") || "")
+      .get()
+      .map((href) => normalizeAbsoluteUrl(config.baseUrl, href))
+      .filter((href): href is string => Boolean(href))
+      .filter((href) => href.toLowerCase().startsWith(expectedPrefix))
+      .filter((href) => /\/page\/\d+\/?$/i.test(href))
+      .forEach((href) => urls.add(href));
+  }
+
+  if (paginationMode === "rel-next" || paginationMode === "anchors-and-rel-next") {
+    const relNext = normalizeAbsoluteUrl(config.baseUrl, $("link[rel='next']").attr("href"));
+    if (relNext && /\/page\/\d+\/?$/i.test(relNext)) {
+      urls.add(relNext);
+    }
+  }
+
+  return Array.from(urls);
+}
+
+function collectAnimeCardsFromHtml(
+  $: CheerioAPI,
+  config: GenericSiteConfig,
+  limit: number,
+  fallbackStatus: ScraperAnime["status"],
+): ScraperAnime[] {
+  const animePathSegment = config.animePathSegment ?? "/anime/";
+  const results: ScraperAnime[] = [];
+
+  $("[class*='anime']:not([class*='episode']), .anime-card, .anime-item, .MovieItem, article, .poster").each((_, card) => {
+    if (results.length >= limit) return false;
+
+    const cardNode = $(card);
+    const link =
+      cardNode.find("a").first().attr("href") ||
+      cardNode.attr("href") ||
+      "";
+    const title =
+      cardNode.find("[class*='title'], h2, h3, h4").first().text().trim() ||
+      cardNode.find("a").first().text().trim() ||
+      "";
+    const image =
+      cardNode.find("img").first().attr("src") ||
+      cardNode.find("img").first().attr("data-src") ||
+      extractBackgroundImageUrl(cardNode.find(".poster").first().attr("style")) ||
+      extractBackgroundImageUrl(cardNode.attr("style")) ||
+      "";
+    const absoluteLink = normalizeAbsoluteUrl(config.baseUrl, link);
+    if (!absoluteLink || !absoluteLink.includes(animePathSegment)) return;
+
+    const slug = extractSlugFromUrl(absoluteLink, animePathSegment);
+    if (!slug || results.some((item) => item.slug === slug)) return;
+
+    results.push({
+      slug,
+      title: pickBestTitle(title, slug.replace(/-/g, " ")),
+      coverImage: normalizeAbsoluteUrl(config.baseUrl, image),
+      status: fallbackStatus,
+      type: "tv",
+      episodesCount: 0,
+    });
+  });
+
+  return results;
+}
+
+async function scrapeAnimeEpisodesWithHtml(config: GenericSiteConfig, animeSlug: string): Promise<ScraperEpisode[]> {
+  const animePathSegment = config.animePathSegment ?? "/anime/";
+  const episodePathSegment = config.episodePathSegment ?? "/episode/";
+  const url = `${config.baseUrl}${animePathSegment}${animeSlug}`;
+  const scrapedEpisodes: ScrapedEpisodeAnchor[] = [];
+  const pagesToVisit = [url];
+  const visitedPages = new Set<string>();
+
+  while (pagesToVisit.length > 0 && visitedPages.size < 50) {
+    const pageUrl = pagesToVisit.shift();
+    if (!pageUrl || visitedPages.has(pageUrl)) continue;
+    visitedPages.add(pageUrl);
+
+    try {
+      const $ = await fetchHtmlDocument(pageUrl);
+      scrapedEpisodes.push(...extractEpisodeAnchorsFromHtml($));
+
+      for (const nextUrl of extractAnimePaginationUrlsFromHtml($, config, animeSlug)) {
+        if (!visitedPages.has(nextUrl) && !pagesToVisit.includes(nextUrl)) {
+          pagesToVisit.push(nextUrl);
+        }
+      }
+    } catch (error) {
+      console.error(`HTML episode scrape failed for ${config.id}/${animeSlug} page ${pageUrl}:`, error);
+    }
+  }
+
+  const episodes: ScraperEpisode[] = [];
+  for (const episode of scrapedEpisodes) {
+    const encoded = episode.onclick.match(/['"]([A-Za-z0-9+/_=-]{8,})['"]/)?.[1] ?? "";
+    const decodedHref = decodeBase64Url(encoded);
+    const absoluteHref = normalizeAbsoluteUrl(config.baseUrl, decodedHref || episode.href);
+    if (!absoluteHref) continue;
+    if (!looksLikeAnimeEpisodeUrl(config, animeSlug, absoluteHref)) continue;
+    if (!looksLikeEpisodeLinkRobust(`${episode.title} ${episode.imageText}`, absoluteHref, episodePathSegment)) continue;
+
+    const id = deriveEpisodeId(absoluteHref, episodePathSegment);
+    const number = extractEpisodeNumberRobust(`${episode.title} ${episode.imageText}`, absoluteHref);
+    if (!number) continue;
+
+    const preferredTitle = normalizeEpisodeCardTitle(episode.title);
+    const alternateTitle = normalizeEpisodeCardTitle(episode.imageText);
+    episodes.push({
+      id,
+      number,
+      title: !isWeakEpisodeTitle(preferredTitle)
+        ? preferredTitle
+        : alternateTitle || `Episode ${number}`,
+      thumbnail: normalizeAbsoluteUrl(config.baseUrl, episode.thumbnail),
+      sources: [],
+    });
+  }
+
+  const deduped = new Map<number, ScraperEpisode>();
+  for (const episode of episodes) {
+    if (!deduped.has(episode.number)) deduped.set(episode.number, episode);
+  }
+
+  return Array.from(deduped.values()).sort((a, b) => a.number - b.number);
+}
+
+async function scrapeAnimeInfoWithHtml(config: GenericSiteConfig, slug: string): Promise<ScraperAnime | null> {
+  const animePathSegment = config.animePathSegment ?? "/anime/";
+  const url = `${config.baseUrl}${animePathSegment}${slug}`;
+  const $ = await fetchHtmlDocument(url);
+  const structured = extractStructuredAnimeDataFromHtml($, config.baseUrl);
+  const title = extractFirstText($, getTitleSelectors(config));
+  const ogTitle = extractMetaContent($, "meta[property='og:title']");
+  const documentTitle = $("title").text().trim();
+
+  if (!title && !ogTitle && !documentTitle) return null;
+
+  const synopsis = extractFirstText($, getSynopsisSelectors(config));
+  const coverImage = structured.image ?? extractCoverImageFromHtmlWithSelectors($, config.baseUrl, getCoverImageSelectors(config));
+  const statusText = extractFirstText($, ["div.anime-info", "[class*='status']", ".anime-status", ".status"]);
+  const typeText = extractFirstText($, ["div.anime-info", ".anime-card-type", "[class*='type']"]);
+  const ratingText = extractFirstText($, getRatingSelectors(config));
+  const studioText = extractFirstText($, ["[class*='studio']", ".anime-studio", ".studio", "[class*='producer']"]);
+  const yearText = extractFirstText($, ["[class*='year']", ".anime-year", ".release-date", "[class*='released']"]);
+  const malUrl = $('a[href*="myanimelist.net/anime/"]').first().attr("href") || "";
+  const pageText = $("body").text();
+  const genreText = $("a[href*='genre'], a[rel='tag'], .genres a, [class*='genre'] a, [class*='category'] a")
+    .map((_, element) => $(element).text().trim())
+    .get()
+    .filter(Boolean)
+    .join(" | ");
+  const scrapedEpisodes = await scrapeAnimeEpisodesWithHtml(config, slug).catch(() => []);
+
+  const resolvedSynopsis = cleanSynopsisText(synopsis || extractLabeledValue(pageText, ["Ù…Ù„Ø®Øµ Ø§Ù„Ù‚ØµØ©", "Ø§Ù„Ù‚ØµØ©", "Synopsis", "Description"]));
+  const resolvedRating = ratingText || extractLabeledValue(pageText, ["Ø§Ù„ØªÙ‚ÙŠÙŠÙ…", "IMDb", "ØªÙ‚ÙŠÙŠÙ… Ø§Ù„Ø¹Ø±Ø¶", "rating", "score"]);
+  const resolvedStudio = studioText || extractLabeledValue(pageText, ["Ø§Ù„Ø§Ø³ØªÙˆØ¯ÙŠÙˆ", "studio", "producer", "studios"]);
+  const resolvedYear = yearText || extractLabeledValue(pageText, ["Ø¨Ø¯Ø§ÙŠØ© Ø§Ù„Ø¹Ø±Ø¶", "ØªØ§Ø±ÙŠØ® Ø§Ù„Ø§ØµØ¯Ø§Ø±", "Ø¹Ø±Ø¶ Ù…Ù†", "release", "year"]);
+  const yearMatch = resolvedYear.match(/(\d{4})/);
+  const malId = malUrl.match(/myanimelist\.net\/anime\/(\d+)/)?.[1];
+  const finalSynopsis = cleanStructuredSynopsisText(structured.description || resolvedSynopsis);
+  const finalRating = structured.rating || resolvedRating;
+  const finalReleaseYear = structured.year ?? (yearMatch ? Number.parseInt(yearMatch[1], 10) : undefined);
+  const finalGenres = structured.genres?.join(" | ") || genreText || undefined;
+
+  return {
+    slug,
+    title: pickBestTitle(structured.title, structured.alternateTitle, title, ogTitle, documentTitle, slug.replace(/-/g, " ")),
+    synopsis: finalSynopsis.slice(0, 2000),
+    coverImage,
+    externalId: malId,
+    sourceUrl: url,
+    status: toStatus(statusText),
+    type: toType(typeText),
+    episodesCount: Math.min(Math.max(scrapedEpisodes.length, structured.episodesCount ?? 0), 500),
+    rating: finalRating || undefined,
+    studio: resolvedStudio || undefined,
+    releaseYear: finalReleaseYear,
+    categoryName: finalGenres,
+  };
+}
+
+async function scrapeLatestAnimeWithHtml(config: GenericSiteConfig, limit = 20): Promise<ScraperAnime[]> {
+  const latestUrl = config.latestUrl ?? config.baseUrl;
+  const $ = await fetchHtmlDocument(latestUrl);
+  return collectAnimeCardsFromHtml($, config, limit, "ongoing");
+}
+
+async function searchAnimeWithHtml(config: GenericSiteConfig, query: string): Promise<ScraperAnime[]> {
+  const searchUrlFactories = config.searchUrls ?? [(value: string) => `${config.baseUrl}/?s=${encodeURIComponent(value)}`];
+  const deduped = new Map<string, ScraperAnime>();
+
+  for (const factory of searchUrlFactories) {
+    try {
+      const $ = await fetchHtmlDocument(factory(query));
+      for (const anime of collectAnimeCardsFromHtml($, config, 15, "upcoming")) {
+        if (!deduped.has(anime.slug)) deduped.set(anime.slug, anime);
+        if (deduped.size >= 15) break;
+      }
+    } catch (error) {
+      console.error(`HTML search scrape failed for ${config.id} with query "${query}":`, error);
+    }
+
+    if (deduped.size >= 15) break;
+  }
+
+  return Array.from(deduped.values());
 }
 
 export async function scrapeAnimeEpisodesWithConfig(config: GenericSiteConfig, animeSlug: string): Promise<ScraperEpisode[]> {
+  const lightweightEpisodes = await scrapeAnimeEpisodesWithHtml(config, animeSlug).catch((error) => {
+    console.error(`Lightweight episode scrape failed for ${config.id}/${animeSlug}:`, error);
+    return [];
+  });
+  if (lightweightEpisodes.length > 0) return lightweightEpisodes;
+
   const browser = await getBrowser(config.id);
   const page = await browser.newPage();
   const animePathSegment = config.animePathSegment ?? "/anime/";
@@ -595,6 +1038,12 @@ export async function scrapeAnimeEpisodesWithConfig(config: GenericSiteConfig, a
 }
 
 export async function scrapeAnimeInfoWithConfig(config: GenericSiteConfig, slug: string): Promise<ScraperAnime | null> {
+  const lightweightAnime = await scrapeAnimeInfoWithHtml(config, slug).catch((error) => {
+    console.error(`Lightweight anime scrape failed for ${config.id}/${slug}:`, error);
+    return null;
+  });
+  if (lightweightAnime) return lightweightAnime;
+
   const browser = await getBrowser(config.id);
   const page = await browser.newPage();
   const animePathSegment = config.animePathSegment ?? "/anime/";
@@ -603,17 +1052,21 @@ export async function scrapeAnimeInfoWithConfig(config: GenericSiteConfig, slug:
     const url = `${config.baseUrl}${animePathSegment}${slug}`;
     if (!await safeNavigate(page, url)) return null;
 
-    await page.waitForSelector("h1, .anime-details-title, .anime-title, [class*='title']", { timeout: 10000 });
+    const titleSelector = getTitleSelectors(config).join(", ");
+    await page.waitForSelector(titleSelector, { timeout: 10000 });
 
     const structured = await extractStructuredAnimeData(page, config.baseUrl);
-    const title = await page.$eval("h1, .anime-details-title, .anime-title, [class*='title']", (el) => el.textContent?.trim() || "").catch(() => "");
+    const titleCandidates = await page
+      .$$eval(titleSelector, (elements) => elements.map((el) => el.textContent?.trim() || "").filter(Boolean))
+      .catch(() => []);
+    const title = titleCandidates[0] || "";
     const ogTitle = await page.$eval("meta[property='og:title']", (el) => el.getAttribute("content") || "").catch(() => "");
     const documentTitle = await page.title().catch(() => "");
-    const synopsis = await page.$eval(".content, p.anime-story, [class*='synopsis'], [class*='description'], .story, .anime-story, .entry-content p", (el) => el.textContent?.trim() || "").catch(() => "");
-    const coverImage = structured.image ?? await extractCoverImage(page, config.baseUrl);
+    const synopsis = await page.$eval(getSynopsisSelectors(config).join(", "), (el) => el.textContent?.trim() || "").catch(() => "");
+    const coverImage = structured.image ?? await extractCoverImageWithSelectors(page, config.baseUrl, getCoverImageSelectors(config));
     const statusText = await page.$eval("div.anime-info, [class*='status'], .anime-status, .status", (el) => el.textContent?.toLowerCase() || "").catch(() => "");
     const typeText = await page.$eval("div.anime-info, .anime-card-type, [class*='type']", (el) => el.textContent?.toLowerCase() || "").catch(() => "");
-    const ratingText = await page.$eval("[class*='rating'], .anime-rating, .score, [class*='score']", (el) => el.textContent?.trim() || "").catch(() => "");
+    const ratingText = await page.$eval(getRatingSelectors(config).join(", "), (el) => el.textContent?.trim() || "").catch(() => "");
     const studioText = await page.$eval("[class*='studio'], .anime-studio, .studio, [class*='producer']", (el) => el.textContent?.trim() || "").catch(() => "");
     const yearText = await page.$eval("[class*='year'], .anime-year, .release-date, [class*='released']", (el) => el.textContent?.trim() || "").catch(() => "");
     const malUrl = await page.$eval("a[href*='myanimelist.net/anime/']", (el) => el.getAttribute("href") || "").catch(() => "");
@@ -850,6 +1303,12 @@ export async function scrapeEpisodeSourcesWithConfig(config: GenericSiteConfig, 
 }
 
 export async function scrapeLatestAnimeWithConfig(config: GenericSiteConfig, limit = 20): Promise<ScraperAnime[]> {
+  const lightweightLatest = await scrapeLatestAnimeWithHtml(config, limit).catch((error) => {
+    console.error(`Lightweight latest scrape failed for ${config.id}:`, error);
+    return [];
+  });
+  if (lightweightLatest.length > 0) return lightweightLatest;
+
   const browser = await getBrowser(config.id);
   const page = await browser.newPage();
   const results: ScraperAnime[] = [];
@@ -898,6 +1357,12 @@ export async function scrapeLatestAnimeWithConfig(config: GenericSiteConfig, lim
 }
 
 export async function searchAnimeWithConfig(config: GenericSiteConfig, query: string): Promise<ScraperAnime[]> {
+  const lightweightResults = await searchAnimeWithHtml(config, query).catch((error) => {
+    console.error(`Lightweight search scrape failed for ${config.id} with query "${query}":`, error);
+    return [];
+  });
+  if (lightweightResults.length > 0) return lightweightResults;
+
   const browser = await getBrowser(config.id);
   const page = await browser.newPage();
   const results: ScraperAnime[] = [];

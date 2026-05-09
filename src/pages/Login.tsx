@@ -36,6 +36,30 @@ const emptyForm = {
   password: "",
 };
 
+function validateAuthForm(mode: AuthMode, form: typeof emptyForm) {
+  if (mode === "signup") {
+    const name = form.name.trim();
+    if (name.length < 2) return "Use at least 2 characters for your name.";
+    if (name.length > 60) return "Names must be 60 characters or less.";
+  }
+
+  const email = form.email.trim();
+  if (!email) return "Enter a valid email address.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return "Enter a valid email address.";
+  }
+  if (email.length > 320) return "Email addresses must be 320 characters or less.";
+
+  if (form.password.length < 8) {
+    return "Use at least 8 characters for your password.";
+  }
+  if (form.password.length > 72) {
+    return "Passwords must be 72 characters or less.";
+  }
+
+  return "";
+}
+
 export default function Login() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -130,19 +154,29 @@ export default function Login() {
     event.preventDefault();
     setError("");
 
-    if (mode === "signup") {
-      await signUpMutation.mutateAsync({
-        name: form.name.trim(),
-        email: form.email.trim(),
-        password: form.password,
-      });
+    const validationError = validateAuthForm(mode, form);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
-    await signInMutation.mutateAsync({
-      email: form.email.trim(),
-      password: form.password,
-    });
+    try {
+      if (mode === "signup") {
+        await signUpMutation.mutateAsync({
+          name: form.name.trim(),
+          email: form.email.trim(),
+          password: form.password,
+        });
+        return;
+      }
+
+      await signInMutation.mutateAsync({
+        email: form.email.trim(),
+        password: form.password,
+      });
+    } catch {
+      // Mutation errors are already surfaced through the mutation onError handlers.
+    }
   };
 
   const switchMode = (nextMode: AuthMode) => {

@@ -1,4 +1,9 @@
 services:
+  - type: keyvalue
+    name: synx-queue
+    plan: starter
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
   - type: web
     name: synx-app
     runtime: docker
@@ -15,7 +20,7 @@ services:
       - key: APP_ID
         value: synx-web
       - key: APP_SECRET
-        generateValue: true
+        sync: false
       - key: DATABASE_URL
         fromDatabase:
           name: synx-db
@@ -24,8 +29,22 @@ services:
         value: /var/data/anime-covers
       - key: SCRAPER_EXECUTION_MODE
         value: queue
+      - key: SCRAPER_QUEUE_BACKEND
+        value: bullmq
+      - key: SCRAPER_QUEUE_NAME
+        value: synx-scrape-jobs
+      - key: REDIS_URL
+        fromService:
+          name: synx-queue
+          type: keyvalue
+          property: connectionString
       - key: SITE_URL
         sync: false
+      - key: PUBLIC_WEB_URL
+        fromService:
+          name: synx-public-web
+          type: web
+          envVarKey: NEXT_PUBLIC_SITE_URL
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: VITE_GOOGLE_CLIENT_ID
@@ -40,6 +59,40 @@ services:
       name: synx-media
       mountPath: /var/data
       sizeGB: 5
+  - type: web
+    name: synx-public-web
+    runtime: node
+    plan: starter
+    rootDir: apps/public-web
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: APP_ID
+        value: synx-public-web
+      - key: APP_SECRET
+        fromService:
+          name: synx-app
+          type: web
+          envVarKey: APP_SECRET
+      - key: DATABASE_URL
+        fromDatabase:
+          name: synx-db
+          property: connectionString
+      - key: LEGACY_API_INTERNAL_HOSTPORT
+        fromService:
+          name: synx-app
+          type: web
+          property: hostport
+      - key: NEXT_PUBLIC_LEGACY_API_BASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
   - type: worker
     name: synx-scraper-worker
     runtime: docker
@@ -60,6 +113,15 @@ services:
           property: connectionString
       - key: SCRAPER_EXECUTION_MODE
         value: queue
+      - key: SCRAPER_QUEUE_BACKEND
+        value: bullmq
+      - key: SCRAPER_QUEUE_NAME
+        value: synx-scrape-jobs
+      - key: REDIS_URL
+        fromService:
+          name: synx-queue
+          type: keyvalue
+          property: connectionString
       - key: SCRAPER_WORKER_POLL_MS
         value: 5000
 

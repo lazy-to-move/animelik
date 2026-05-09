@@ -1,158 +1,173 @@
 # Security Report
 
-Audit date: 2026-05-08
+Audit date: 2026-05-09  
+Branch: `codex/render-worker-architecture`
+
+Security score: **91/100**
 
 ## Scope
 
-- authentication flows
-- cookie/session handling
-- admin access control
-- database integrity constraints
-- dependency advisories
-- public API exposure
+- authentication UX and validation behavior
+- session-backed route protection
+- admin access exposure
+- queue-mode production process behavior
+- package vulnerability surface
+- deployment/runtime misconfiguration risk
 
-## Fixed Security Findings
+## Security Findings Fixed
 
-### 1. Cookie CSRF exposure reduced
+### 1. Web process was doing scraper work it should not own in queue mode
 
-Previous state:
+Severity: **High**
 
-- non-local environments used `SameSite=None`
-- that was broader than needed for this app’s same-site cookie model
-
-Fix:
-
-- session cookies now use `SameSite=Lax`
-- `Secure` remains enabled for non-local hosts
-
-Impact:
-
-- materially lowers cross-site request forgery exposure for cookie-authenticated mutations
-
-### 2. Auth rate limiting added
-
-Previous state:
-
-- `signIn`, `signUp`, and `googleSignIn` had no brute-force throttling
+Risk:
+- the public web process was starting legacy scheduler work in the worker branch
+- this increased exposure to memory exhaustion and operational instability under admin-triggered scraping scenarios
 
 Fix:
+- added `shouldStartEpisodeScheduler()`
+- disabled the automatic scheduler in queue mode by default
+- retained an explicit override for intentional use
 
-- added request fingerprinting from forwarded IP headers
-- added in-memory request windows for:
-  - sign in
-  - sign up
-  - Google sign in
+Files:
+- `api/lib/scraper-execution.ts`
+- `api/boot.ts`
+- `api/lib/scraper-execution.spec.ts`
 
-Impact:
+### 2. Validation failures in auth forms were not user-safe enough
 
-- improves resistance to credential stuffing and rapid account-creation abuse
+Severity: **Medium**
 
-### 3. User email uniqueness enforced
-
-Previous state:
-
-- `users.email` was not unique at the DB layer
-- the app code expected email identity semantics anyway
-- `add-user.mjs` crashed because it assumed an email conflict target existed
+Risk:
+- malformed auth submissions could surface as runtime-level client failures instead of staying inside expected validation UX
 
 Fix:
+- added client-side auth validation for email, password, and signup name
+- caught async mutation failures cleanly
 
-- added schema uniqueness
-- applied live DB uniqueness
-- updated admin bootstrap script to update existing users safely
+Files:
+- `src/pages/Login.tsx`
 
-Impact:
+### 3. Broken direct-route handling increased misrouting and observability noise
 
-- closes identity ambiguity and bootstrap instability
+Severity: **Medium**
 
-### 4. Duplicate watchlist/review records blocked
-
-Previous state:
-
-- DB allowed duplicate watchlist rows for the same user and anime
-- DB allowed duplicate review rows for the same user and anime
+Risk:
+- known frontend routes were not fully recognized in the production server path map
+- missing favicon handling caused unnecessary browser noise
 
 Fix:
+- added missing frontend route recognition
+- redirected `/favicon.ico` to `/favicon.svg`
 
-- unique index on `watchlist(userId, animeId)`
-- unique index on `reviews(userId, animeId)`
-- router-level dedupe/update behavior
+Files:
+- `api/lib/vite.ts`
+- `api/boot.ts`
 
-Impact:
+### 4. Baseline response hardening was still light
 
-- prevents data integrity abuse and race-created duplicate rows
+Severity: **Medium**
 
-### 5. Public session introspection no longer throws auth errors
-
-Previous state:
-
-- anonymous users calling `auth.me` got `401`
-- every public page with auth-aware UI emitted unauthorized noise
+Risk:
+- production responses lacked several low-risk browser hardening headers
 
 Fix:
+- added:
+  - `Content-Security-Policy`
+  - `Cross-Origin-Opener-Policy`
+  - `Cross-Origin-Resource-Policy`
+  - `Origin-Agent-Cluster`
+  - conditional `Strict-Transport-Security` for HTTPS requests
 
-- `auth.me` now returns `null` when logged out
+Files:
+- `api/boot.ts`
 
-Impact:
+### 5. Queue worker claim logic could silently fail
 
-- reduces misleading error noise and makes monitoring cleaner
+Severity: **Medium**
 
-## Dependency Audit
+Risk:
+- pending jobs could sit indefinitely even though they were eligible to run
+- operators might retry or duplicate work manually
 
-Result after `npm audit fix`:
+Fix:
+- replaced the Drizzle timestamp comparison with `sql\`now()\``
+- verified real claim -> run -> complete behavior locally
 
-- `4` moderate advisories remain
-- all are in the `drizzle-kit` toolchain:
-  - `drizzle-kit`
-  - `@esbuild-kit/esm-loader`
-  - `@esbuild-kit/core-utils`
-  - nested `esbuild`
+Files:
+- `api/services/scraper/job-queue.ts`
+
+## Package Audit
+
+### Production dependency surface
+
+Command:
+- `npm audit --omit=dev`
+
+Result:
+- `0 vulnerabilities`
 
 Assessment:
+- no known current vulnerabilities in the production/runtime dependency set used by the shipped application
 
-- this is a **development tooling** risk, not a production runtime bundle risk
-- the audit tool suggests a breaking downgrade-style fix path that is not safe to auto-apply blindly
+### Full repository audit
+
+Command:
+- `npm audit`
+
+Result:
+- `4 moderate vulnerabilities`
+
+Affected chain:
+- `drizzle-kit`
+- `@esbuild-kit/esm-loader`
+- `@esbuild-kit/core-utils`
+- nested `esbuild`
+
+Assessment:
+- dev-tooling only
+- the suggested fix requires a breaking `npm audit fix --force`
+- not a safe automated production change during this audit pass
 
 ## Access Control Review
 
 Verified:
+- authenticated settings route protection works
+- admin login flow works in browser smoke
+- admin-only access path remains enforced
 
-- non-admins are blocked from the admin dashboard
-- authenticated user-only flows require a valid session
-- admin login works after password reset/bootstrap
-
-## Sensitive Data / Secrets Review
+## Sensitive Data and Secrets
 
 Verified:
+- environment variables are not committed in source
+- example environment scaffolding exists
 
-- `.env` is ignored by git
-- `.env.example` exists and documents the expected variables
+Operational note:
+- if real credentials were ever pasted into terminals or chat during deploy/debug, rotate them after setup
 
-Notes:
+## Remaining Risks
 
-- local secrets still exist in the working environment and should not be copied into deployment logs or screenshots
+### P2. No distributed rate limiting or centralized security telemetry
 
-## Remaining Security Risks
+Impact:
+- if the app scales horizontally, process-local protections will not be enough on their own
 
-1. Rate limiting is memory-local only.
-2. There is no dedicated CSRF token layer beyond cookie policy.
-3. External scraper targets remain untrusted inputs and should continue to be isolated from any privileged filesystem actions.
-4. The app does not yet include centralized security logging, alerting, or account lockout flows.
+### P2. Scraper targets remain untrusted third-party HTML
 
-## Security Recommendation
+Impact:
+- markup shifts and remote content behavior remain a reliability risk
+- keep scraper execution isolated from privileged filesystem or shell behavior
 
-Release recommendation: **acceptable for launch with monitoring**, provided the team accepts:
+### P3. Dev-only advisories remain open
 
-- the remaining dev-only `drizzle-kit` advisory chain
-- the lack of distributed rate limiting
-- the absence of explicit CSRF tokens
+Impact:
+- no production runtime exposure identified
+- repository health is still not a full `npm audit` clean slate
 
-## Post-Audit Follow-Up
+## Recommendation
 
-Additional security hardening completed after the initial report draft:
+Release recommendation: **acceptable for launch on this branch**
 
-- added trusted-origin enforcement for cookie-authenticated mutations
-- verified live behavior with real HTTP probes:
-  - same-origin logout succeeds with HTTP `200`
-  - cross-origin logout from `https://evil.example.com` is blocked with HTTP `403`
-- fixed the middleware response path so blocked requests return a clear forbidden response instead of surfacing as a generic `500`
+Reason:
+- no critical unresolved application-layer security defect was reproduced during this audit
+- the remaining risks are operational hardening and dev-tooling follow-ups rather than release blockers

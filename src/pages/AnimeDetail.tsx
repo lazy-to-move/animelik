@@ -90,6 +90,8 @@ export default function AnimeDetail() {
             className="w-full h-full"
             imageClassName="w-full h-full object-cover"
             fallbackClassName="w-full h-full"
+            loading="eager"
+            fetchPriority="high"
           />
         ) : (
           <>
@@ -101,6 +103,8 @@ export default function AnimeDetail() {
                 className="w-full h-full"
                 imageClassName="w-full h-full object-cover blur-2xl"
                 fallbackClassName="w-full h-full"
+                loading="eager"
+                fetchPriority="high"
               />
             </div>
             <div className="absolute inset-0 opacity-30">
@@ -111,6 +115,8 @@ export default function AnimeDetail() {
                 className="w-full h-full"
                 imageClassName="w-full h-full object-cover scale-105"
                 fallbackClassName="w-full h-full"
+                loading="eager"
+                fetchPriority="high"
               />
             </div>
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(130,87,242,0.2),transparent_35%),radial-gradient(circle_at_80%_30%,rgba(255,255,255,0.08),transparent_28%)]" />
@@ -159,6 +165,8 @@ export default function AnimeDetail() {
                   className="w-full h-full object-cover rounded-[2.5rem]"
                   imageClassName="w-full h-full object-cover rounded-[2.5rem]"
                   fallbackClassName="w-full h-full object-cover rounded-[2.5rem]"
+                  loading="eager"
+                  fetchPriority="high"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
               </div>
@@ -169,7 +177,7 @@ export default function AnimeDetail() {
                 className="flex items-center justify-center gap-3 px-6 py-4 rounded-2xl bg-[#693def] text-white font-bold hover:bg-[#8257f2] transition-all duration-300 hover:scale-[1.02] shadow-xl shadow-[#693def]/20"
               >
                 <Play className="w-5 h-5 fill-white" />
-                شاهد الحلقة 1
+                Watch Episode 1
               </Link>
               {user && (
                 <button
@@ -320,7 +328,7 @@ export default function AnimeDetail() {
 
             {/* Reviews */}
             <div>
-              <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+              <h2 id="anime-detail-reviews" className="text-xl font-bold text-white mb-4 flex items-center gap-2">
                 <MessageSquare className="w-5 h-5 text-[#693def]" />
                 Reviews ({reviews?.length || 0})
               </h2>
@@ -330,8 +338,11 @@ export default function AnimeDetail() {
                 <div className="p-4 rounded-xl bg-white/5 border border-white/10 mb-6">
                   <p className="text-sm font-medium text-white mb-3">Write a Review</p>
                   <div className="flex items-center gap-2 mb-3">
-                    <span className="text-sm text-[#888888]">Rating:</span>
+                    <label htmlFor="anime-detail-review-rating" className="text-sm text-[#888888]">
+                      Rating:
+                    </label>
                     <input
+                      id="anime-detail-review-rating"
                       type="range"
                       min="1"
                       max="10"
@@ -341,7 +352,11 @@ export default function AnimeDetail() {
                     />
                     <span className="text-sm font-bold text-yellow-400">{reviewRating}/10</span>
                   </div>
+                  <label htmlFor="anime-detail-review-text" className="sr-only">
+                    Review text
+                  </label>
                   <textarea
+                    id="anime-detail-review-text"
                     value={reviewText}
                     onChange={(e) => setReviewText(e.target.value)}
                     placeholder="Share your thoughts..."
@@ -376,7 +391,7 @@ export default function AnimeDetail() {
                     <div className="flex items-center gap-3 mb-3">
                       <img
                         src={review.userAvatar || "/avatars/user1.jpg"}
-                        alt={review.userName || "User"}
+                        alt={review.userName ? `${review.userName} avatar` : "User avatar"}
                         className="w-8 h-8 rounded-full object-cover"
                       />
                       <div>

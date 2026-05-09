@@ -1,7 +1,22 @@
-import { hostname } from "os";
 import { randomUUID } from "crypto";
+import { hostname } from "os";
+import { Worker as BullWorker } from "bullmq";
 import type { ScrapeJob } from "@db/schema";
-import { claimNextScrapeJob, completeScrapeJob, failScrapeJob } from "./services/scraper/job-queue";
+import { verifyRuntimeDependencies } from "./lib/runtime-dependencies";
+import { assertRuntimeReadiness } from "./lib/runtime-config";
+import {
+  getScraperExecutionMode,
+  getScraperQueueBackend,
+} from "./lib/scraper-execution";
+import {
+  claimNextScrapeJob,
+  closeScrapeQueueConnections,
+  completeScrapeJob,
+  failScrapeJob,
+  getRedisConnection,
+  getScraperQueueName,
+  markScrapeJobRunning,
+} from "./services/scraper/job-queue";
 import {
   runImportFromSourceOperation,
   runRefreshAnimeMetadataOperation,
@@ -10,7 +25,7 @@ import {
 
 const pollMs = Math.max(
   1000,
-  Number.parseInt(process.env.SCRAPER_WORKER_POLL_MS ?? "5000", 10) || 5000
+  Number.parseInt(process.env.SCRAPER_WORKER_POLL_MS ?? "5000", 10) || 5000,
 );
 const workerId =
   process.env.SCRAPER_WORKER_ID?.trim() ||
@@ -34,7 +49,6 @@ async function processJob(job: ScrapeJob) {
         slug: job.payload.slug,
         importEpisodes: job.payload.importEpisodes ?? true,
         options: {
-          // Worker and web service do not share a local disk, so keep remote image URLs here.
           downloadImages: false,
         },
       });
@@ -63,15 +77,61 @@ async function processJob(job: ScrapeJob) {
       });
     }
 
+    case "queue_probe": {
+      return {
+        success: true as const,
+        probeId: job.payload?.probeId ?? null,
+        processedByWorkerId: workerId,
+        processedAt: new Date().toISOString(),
+        message: "Queue probe completed successfully.",
+      };
+    }
+
     default: {
       throw new Error(`Unsupported scrape job type: ${String(job.type)}`);
     }
   }
 }
 
-async function runLoop() {
+async function handleClaimedJob(job: ScrapeJob) {
+  console.log(`[scraper-worker] claimed job ${job.id} (${job.type})`);
+
+  try {
+    const result = await processJob(job);
+
+    if (result.success) {
+      await completeScrapeJob({
+        jobId: job.id,
+        result,
+      });
+      console.log(`[scraper-worker] completed job ${job.id} (${job.type})`);
+      return;
+    }
+
+    await failScrapeJob({
+      jobId: job.id,
+      errorMessage: result.error,
+      result,
+    });
+    console.warn(
+      `[scraper-worker] failed job ${job.id} (${job.type}): ${result.error}`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await failScrapeJob({
+      jobId: job.id,
+      errorMessage: message,
+    });
+    console.error(
+      `[scraper-worker] crashed job ${job.id} (${job.type}):`,
+      error,
+    );
+  }
+}
+
+async function runDbLoop() {
   console.log(
-    `[scraper-worker] started worker ${workerId} with ${pollMs}ms polling`
+    `[scraper-worker] started worker ${workerId} in db queue mode with ${pollMs}ms polling`,
   );
 
   while (!shuttingDown) {
@@ -82,45 +142,47 @@ async function runLoop() {
       continue;
     }
 
-    console.log(
-      `[scraper-worker] claimed job ${job.id} (${job.type})`
-    );
+    await handleClaimedJob(job);
+  }
+}
 
-    try {
-      const result = await processJob(job);
+async function runBullMqLoop() {
+  console.log(
+    `[scraper-worker] started worker ${workerId} in bullmq mode on queue ${getScraperQueueName()}`,
+  );
 
-      if (result.success) {
-        await completeScrapeJob({
-          jobId: job.id,
-          result,
-        });
-        console.log(
-          `[scraper-worker] completed job ${job.id} (${job.type})`
-        );
-      } else {
-        await failScrapeJob({
-          jobId: job.id,
-          errorMessage: result.error,
-          result,
-        });
-        console.warn(
-          `[scraper-worker] failed job ${job.id} (${job.type}): ${result.error}`
-        );
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await failScrapeJob({
-        jobId: job.id,
-        errorMessage: message,
+  const worker = new BullWorker<{ dbJobId: number }>(
+    getScraperQueueName(),
+    async (queueJob) => {
+      const job = await markScrapeJobRunning({
+        jobId: queueJob.data.dbJobId,
+        workerId,
       });
-      console.error(
-        `[scraper-worker] crashed job ${job.id} (${job.type}):`,
-        error
-      );
-    }
+
+      if (!job) {
+        console.warn(
+          `[scraper-worker] skipped queue job ${queueJob.id}: DB job ${queueJob.data.dbJobId} is no longer pending`,
+        );
+        return;
+      }
+
+      await handleClaimedJob(job);
+    },
+    {
+      connection: getRedisConnection(),
+      concurrency: 1,
+    },
+  );
+
+  worker.on("error", (error) => {
+    console.error("[scraper-worker] bullmq worker error:", error);
+  });
+
+  while (!shuttingDown) {
+    await sleep(500);
   }
 
-  console.log(`[scraper-worker] stopping worker ${workerId}`);
+  await worker.close();
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -129,4 +191,32 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-await runLoop();
+try {
+  const runtimeReadiness = assertRuntimeReadiness({ role: "worker" });
+  const dependencyStatus = await verifyRuntimeDependencies({ role: "worker" });
+  if (runtimeReadiness.checks.length > 0) {
+    console.warn(
+      `[scraper-worker] runtime warnings: ${runtimeReadiness.checks
+        .filter((check) => check.status === "warn")
+        .map((check) => check.message)
+        .join(" | ")}`,
+    );
+  }
+  console.log(`[scraper-worker] ${dependencyStatus.queue.message}`);
+  console.log(`[scraper-worker] ${dependencyStatus.media.message}`);
+
+  if (getScraperExecutionMode() !== "queue") {
+    console.warn(
+      `[scraper-worker] execution mode is ${getScraperExecutionMode()}, but the worker was started anyway.`,
+    );
+  }
+
+  if (getScraperQueueBackend() === "bullmq") {
+    await runBullMqLoop();
+  } else {
+    await runDbLoop();
+  }
+} finally {
+  await closeScrapeQueueConnections();
+  console.log(`[scraper-worker] stopping worker ${workerId}`);
+}

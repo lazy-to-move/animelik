@@ -1,4 +1,5 @@
 import type { ScraperAnime } from "./types";
+import type { MetadataProviderSource } from "./media-provenance";
 
 type JikanSearchItem = {
   mal_id?: number;
@@ -54,6 +55,10 @@ type TvMazeSearchItem = {
 };
 
 type ResolvedMetadata = Partial<ScraperAnime>;
+export type MetadataEnrichmentResult = {
+  data: ResolvedMetadata;
+  source: MetadataProviderSource | "none";
+};
 type CandidateScore = {
   item: JikanSearchItem;
   totalScore: number;
@@ -309,8 +314,8 @@ function scoreTvMazeCandidate(show: TvMazeShow, query: string) {
   return 0;
 }
 
-async function resolveTvMazeMetadata(base: ScraperAnime, candidates: string[]): Promise<ResolvedMetadata> {
-  if (base.type !== "tv") return {};
+async function resolveTvMazeMetadata(base: ScraperAnime, candidates: string[]): Promise<MetadataEnrichmentResult> {
+  if (base.type !== "tv") return { data: {}, source: "none" };
 
   for (const candidate of candidates) {
     const response = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(candidate)}`, {
@@ -330,17 +335,25 @@ async function resolveTvMazeMetadata(base: ScraperAnime, candidates: string[]): 
       .sort((left, right) => right.textScore - left.textScore)[0]?.show;
 
     if (!best) continue;
-    return mapTvMazeToMetadata(best, base);
+    return {
+      data: mapTvMazeToMetadata(best, base),
+      source: "tvmaze",
+    };
   }
 
-  return {};
+  return { data: {}, source: "none" };
 }
 
-export async function enrichAnimeMetadata(base: ScraperAnime): Promise<ResolvedMetadata> {
+export async function enrichAnimeMetadata(base: ScraperAnime): Promise<MetadataEnrichmentResult> {
   if (base.externalId) {
     try {
       const exact = await fetchJikanByMalId(base.externalId);
-      if (exact) return resolveDetailedMetadata(exact, base);
+      if (exact) {
+        return {
+          data: await resolveDetailedMetadata(exact, base),
+          source: "jikan",
+        };
+      }
     } catch (error) {
       console.error("Metadata enrichment failed for MAL id:", base.externalId, error);
     }
@@ -363,7 +376,10 @@ export async function enrichAnimeMetadata(base: ScraperAnime): Promise<ResolvedM
         .sort((a, b) => b.totalScore - a.totalScore)[0];
 
       if (!best || best.textScore < MIN_JIKAN_TEXT_SCORE) continue;
-      return resolveDetailedMetadata(best.item, base);
+      return {
+        data: await resolveDetailedMetadata(best.item, base),
+        source: "jikan",
+      };
     } catch (error) {
       console.error("Metadata enrichment failed for candidate:", candidate, error);
     }

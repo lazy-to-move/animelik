@@ -2,9 +2,13 @@ import { z } from "zod";
 import { eq, desc, and, or, sql, inArray } from "drizzle-orm";
 import { createRouter, publicQuery, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { anime, animeGenres, categories, episodes, reviews, watchlist } from "@db/schema";
+import { anime, animeGenres, categories } from "@db/schema";
 import { SOURCE_SITE_IDS } from "./services/scraper/types";
 import { normalizeSearchText, scoreAnimeSearch } from "./lib/anime-search";
+import {
+  deleteAdminAnimeById,
+  deleteAdminAnimeByIds,
+} from "./services/admin-anime-service";
 
 const sourceSiteSchema = z.enum(SOURCE_SITE_IDS);
 
@@ -31,7 +35,10 @@ const animeSelection = {
   slug: anime.slug,
   synopsis: anime.synopsis,
   coverImage: anime.coverImage,
+  coverImageSource: anime.coverImageSource,
   bannerImage: anime.bannerImage,
+  bannerImageSource: anime.bannerImageSource,
+  metadataSource: anime.metadataSource,
   status: anime.status,
   type: anime.type,
   rating: anime.rating,
@@ -317,24 +324,12 @@ export const animeRouter = createRouter({
   delete: adminQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
-      const db = getDb();
-      await db.delete(episodes).where(eq(episodes.animeId, input.id));
-      await db.delete(reviews).where(eq(reviews.animeId, input.id));
-      await db.delete(watchlist).where(eq(watchlist.animeId, input.id));
-      await db.delete(animeGenres).where(eq(animeGenres.animeId, input.id)).catch(() => undefined);
-      await db.delete(anime).where(eq(anime.id, input.id));
-      return { success: true };
+      return deleteAdminAnimeById(input.id);
     }),
 
   bulkDelete: adminQuery
     .input(z.object({ ids: z.array(z.number()).min(1) }))
     .mutation(async ({ input }) => {
-      const db = getDb();
-      await db.delete(episodes).where(inArray(episodes.animeId, input.ids));
-      await db.delete(reviews).where(inArray(reviews.animeId, input.ids));
-      await db.delete(watchlist).where(inArray(watchlist.animeId, input.ids));
-      await db.delete(animeGenres).where(inArray(animeGenres.animeId, input.ids)).catch(() => undefined);
-      await db.delete(anime).where(inArray(anime.id, input.ids));
-      return { success: true, deletedCount: input.ids.length };
+      return deleteAdminAnimeByIds(input.ids);
     }),
 });

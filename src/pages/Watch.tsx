@@ -349,7 +349,11 @@ export default function Watch() {
                         </div>
                         <div>
                           <p className="mb-0.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#555555]">Server</p>
+                          <label htmlFor="watch-server-select" className="sr-only">
+                            Choose player server
+                          </label>
                           <select
+                            id="watch-server-select"
                             value={selectedServer}
                             onChange={(event) => setPreferredServer(event.target.value)}
                             className="cursor-pointer bg-transparent text-sm font-bold text-white focus:outline-none"
@@ -371,7 +375,11 @@ export default function Watch() {
                         </div>
                         <div>
                           <p className="mb-0.5 text-[10px] font-black uppercase tracking-[0.2em] text-[#555555]">Quality</p>
+                          <label htmlFor="watch-quality-select" className="sr-only">
+                            Choose player quality
+                          </label>
                           <select
+                            id="watch-quality-select"
                             value={selectedQuality}
                             onChange={(event) => setPreferredQuality(event.target.value as VideoSource["quality"])}
                             className="cursor-pointer bg-transparent text-sm font-bold text-white focus:outline-none"
@@ -390,7 +398,7 @@ export default function Watch() {
                   <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/5 pt-4">
                     <div className="rounded-2xl border border-[#693def]/10 bg-[#693def]/5 px-4 py-2">
                       <span className="text-xs font-black uppercase tracking-[0.12em] text-[#8257f2]">
-                        Stream • {SERVER_NAMES[selectedServer] || selectedServer || "Auto"}
+                        Stream - {SERVER_NAMES[selectedServer] || selectedServer || "Auto"}
                       </span>
                     </div>
                     <p className="text-xs font-medium text-[#6e6885]">Select a working host and quality for this episode.</p>
@@ -494,9 +502,12 @@ export default function Watch() {
               {user && (
                 <div className="mb-10 rounded-[2rem] border border-white/10 bg-white/5 p-6">
                   <div className="mb-6 flex items-center gap-4">
-                    <span className="text-sm font-black uppercase tracking-widest text-[#555555]">Rate this episode:</span>
+                    <label htmlFor="watch-review-rating" className="text-sm font-black uppercase tracking-widest text-[#555555]">
+                      Rate this episode:
+                    </label>
                     <div className="flex items-center gap-4 rounded-xl border border-white/5 bg-black/40 px-4 py-2">
                       <input
+                        id="watch-review-rating"
                         type="range"
                         min="1"
                         max="10"
@@ -509,7 +520,11 @@ export default function Watch() {
                   </div>
                   <div className="flex gap-4">
                     <div className="relative flex-1">
+                      <label htmlFor="watch-review-text" className="sr-only">
+                        Episode review text
+                      </label>
                       <input
+                        id="watch-review-text"
                         type="text"
                         value={reviewText}
                         onChange={(event) => setReviewText(event.target.value)}
@@ -548,7 +563,7 @@ export default function Watch() {
                       <div className="mb-4 flex items-center gap-4">
                         <img
                           src={review.userAvatar || "/avatars/user1.jpg"}
-                          alt=""
+                          alt={review.userName ? `${review.userName} avatar` : "User avatar"}
                           className="h-10 w-10 rounded-full object-cover ring-2 ring-white/10"
                         />
                         <div className="flex-1">

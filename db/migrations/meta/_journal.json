@@ -36,6 +36,20 @@
       "when": 1778311468288,
       "tag": "0004_serious_northstar",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778328340810,
+      "tag": "0005_young_satana",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778331568046,
+      "tag": "0006_careful_maddog",
+      "breakpoints": true
     }
   ]
 }

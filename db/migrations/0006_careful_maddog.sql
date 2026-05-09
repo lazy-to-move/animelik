@@ -1,0 +1,1 @@
+ALTER TYPE "public"."scrape_job_type" ADD VALUE 'queue_probe';

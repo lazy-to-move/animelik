@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "baseUrl": "http://127.0.0.1:3401",
+  "watchSlug": "video-229",
+  "firstEpisode": 1,
+  "secondEpisode": 3,
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "completedChecks": [
+    "signup",
+    "settings",
+    "review-post",
+    "watch-track",
+    "watch-sync",
+    "broken-report",
+    "watchlist-payload"
+  ],
+  "account": {
+    "email": "next-migration-1778361407755@synx.local",
+    "password": "NextMigration!12345"
+  },
+  "progress": {
+    "sourceEpisode": 1,
+    "targetEpisode": 3
+  }
+}

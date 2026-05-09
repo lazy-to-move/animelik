@@ -1,26 +1,42 @@
 # TODO Before Launch
 
-## Must Do
+Audit date: 2026-05-09  
+Target branch: `codex/render-worker-architecture`
 
-- Commit the generated migration files:
-  - `db/migrations/0002_typical_valeria_richards.sql`
-  - `db/migrations/meta/0002_snapshot.json`
-  - updated `db/migrations/meta/_journal.json`
-- Ensure the older migration SQL files are committed too now that `.gitignore` no longer hides them.
-- Apply the migration in every environment, not only the local DB already patched during this audit.
-- Deploy with the new cross-platform start flow and verify `npm start` on the real target host.
-- Set `SITE_URL` correctly in every deployed environment so canonical URLs and trusted-origin protection match the real domain.
+## Must Do Before Production Release
+
+- Apply the queue worker migration set in every target environment, including `0004_serious_northstar.sql` if it is not already present there.
+- Deploy both services, not just the web app:
+  - Render web service
+  - Render worker service
+- Set production environment variables explicitly:
+  - `SITE_URL`
+  - `DATABASE_URL`
+  - `APP_SECRET`
+  - any auth provider variables you actually use
+- Confirm the worker service is processing jobs in production before enabling admin scraping for real content operations.
+- Verify the production domain serves:
+  - `/`
+  - `/privacy`
+  - `/terms`
+  - `/settings` after login
+  - `/favicon.ico`
+  - `/healthz`
 
 ## Strongly Recommended
 
-- Run a real Lighthouse report against the deployed production URL.
-- Run manual browser checks in Firefox, Edge, and Safari.
-- Monitor scheduler logs after deployment for third-party scraper breakage.
-- Decide how to handle the remaining dev-only `drizzle-kit` audit advisories.
+- Run a real Lighthouse capture on the deployed production URL.
+- Do one manual browser pass in Firefox and Safari.
+- Add monitoring for:
+  - worker crashes
+  - queue backlog growth
+  - scraper job failures by provider
+- Rotate any credentials that were exposed during manual deployment/debug sessions.
+- If you are promoting an older local or staging database, run `npm run db:reconcile:legacy` once before `npm run db:migrate:deploy` when the schema already exists but the Drizzle journal does not.
 
-## Nice To Do Soon After Launch
+## Operational Follow-Up Soon After Launch
 
-- Add distributed rate limiting if the app will run on multiple instances.
-- Add stronger security logging and alerting around auth/admin actions.
-- Improve server-rendered or pre-rendered SEO for dynamic anime pages.
-- Revisit bundle size, especially `framer-motion` and global CSS.
+- Decide whether to keep or replace the current `drizzle-kit` dev-tooling chain that still carries dev-only advisories.
+- Add queue/admin observability dashboards or alerts.
+- Consider additional code splitting for admin and animation-heavy routes.
+- Decide whether the project needs SSR/prerender for stronger SEO on anime detail pages.

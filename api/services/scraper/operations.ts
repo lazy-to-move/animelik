@@ -1,6 +1,4 @@
 import { eq, inArray } from "drizzle-orm";
-import { writeFileSync } from "fs";
-import { join } from "path";
 import {
   anime,
   animeGenres,
@@ -9,9 +7,16 @@ import {
   type Anime,
 } from "@db/schema";
 import { getDb } from "../../queries/connection";
-import { ensureImportedAnimeCoversDir } from "../../lib/imported-media";
+import { storeImportedAnimeImage } from "../../lib/media-storage";
 import { getScraperProvider } from "./provider-registry";
 import { enrichAnimeMetadata } from "./metadata-enrichment";
+import {
+  inferExistingImageSource,
+  resolveStoredImageSource,
+  type ImageOrigin,
+  type MetadataProviderSource,
+  type StoredImageStorageKind,
+} from "./media-provenance";
 import type {
   ScraperAnime,
   ScraperEpisode,
@@ -22,6 +27,11 @@ type Db = ReturnType<typeof getDb>;
 
 type PersistOptions = {
   downloadImages?: boolean;
+};
+
+type DownloadedImageResult = {
+  url: string;
+  storage: StoredImageStorageKind;
 };
 
 export type ScraperActionResult =
@@ -68,7 +78,7 @@ function normalizeStoredSlug(slug: string) {
 async function downloadImage(
   url: string,
   slug: string
-): Promise<string | null> {
+): Promise<DownloadedImageResult | null> {
   if (!url || !url.startsWith("http")) return null;
 
   try {
@@ -80,14 +90,12 @@ async function downloadImage(
     const buffer = await response.arrayBuffer();
     if (buffer.byteLength < 1024) return null;
 
-    const coversDir = ensureImportedAnimeCoversDir();
-    const ext =
-      contentType.split("/")[1]?.split(";")[0]?.replace("jpeg", "jpg") ||
-      url.split(".").pop()?.split("?")[0] ||
-      "jpg";
-    const filename = `${slug}.${ext}`;
-    writeFileSync(join(coversDir, filename), Buffer.from(buffer));
-    return `/anime-covers/${filename}`;
+    return await storeImportedAnimeImage({
+      slug,
+      sourceUrl: url,
+      contentType,
+      buffer: Buffer.from(buffer),
+    });
   } catch (err) {
     console.error("Failed to download image:", err);
     return null;
@@ -240,6 +248,26 @@ function choosePreferredImage(
   return normalizeImagePath(primary) ?? normalizeImagePath(fallback) ?? null;
 }
 
+function determineImageOrigin(
+  scrapedValue: string | undefined,
+  enrichmentValue: string | undefined
+): ImageOrigin {
+  if (!enrichmentValue) return "source";
+  if (!scrapedValue) return "metadata";
+  return enrichmentValue !== scrapedValue ? "metadata" : "source";
+}
+
+function resolveMetadataSource(input: {
+  currentSource?: MetadataProviderSource | "none" | null;
+  existingSource?: string | null;
+}) {
+  if (input.currentSource && input.currentSource !== "none") {
+    return input.currentSource;
+  }
+
+  return input.existingSource ?? "source_site";
+}
+
 function normalizeEpisodeTitle(
   title: string | undefined,
   episodeNumber: number
@@ -351,12 +379,18 @@ async function persistAnimeRecord({
   source,
   slug,
   scrapedData,
+  metadataSource,
+  coverImageOrigin,
+  bannerImageOrigin,
   options,
 }: {
   db: Db;
   source: SourceSiteId;
   slug: string;
   scrapedData: ScraperAnime;
+  metadataSource: MetadataProviderSource | "none";
+  coverImageOrigin: ImageOrigin;
+  bannerImageOrigin: ImageOrigin;
   options?: PersistOptions;
 }) {
   const normalizedSlug = normalizeStoredSlug(slug);
@@ -369,25 +403,30 @@ async function persistAnimeRecord({
   const categoryId = categoryIds[0];
   const shouldDownloadImages = options?.downloadImages ?? true;
 
-  let savedCoverImage = scrapedData.coverImage ?? null;
+  let downloadedCoverImage: DownloadedImageResult | null = null;
   if (shouldDownloadImages && scrapedData.coverImage?.startsWith("http")) {
-    savedCoverImage =
-      (await downloadImage(scrapedData.coverImage, normalizedSlug)) ||
-      scrapedData.coverImage;
+    downloadedCoverImage = await downloadImage(scrapedData.coverImage, normalizedSlug);
   }
 
-  let savedBannerImage = scrapedData.bannerImage ?? savedCoverImage ?? null;
+  const candidateCoverImage = downloadedCoverImage?.url ?? scrapedData.coverImage ?? null;
+
+  let downloadedBannerImage: DownloadedImageResult | null = null;
   if (
     shouldDownloadImages &&
     scrapedData.bannerImage?.startsWith("http") &&
     scrapedData.bannerImage !== scrapedData.coverImage
   ) {
-    savedBannerImage =
-      (await downloadImage(
-        scrapedData.bannerImage,
-        `${normalizedSlug}-banner`
-      )) || scrapedData.bannerImage;
+    downloadedBannerImage = await downloadImage(
+      scrapedData.bannerImage,
+      `${normalizedSlug}-banner`
+    );
   }
+
+  const candidateBannerImage =
+    downloadedBannerImage?.url ??
+    scrapedData.bannerImage ??
+    candidateCoverImage ??
+    null;
 
   const existing = existingAnime[0];
   const normalizedTitle = normalizeTitle(scrapedData.title, normalizedSlug);
@@ -415,6 +454,30 @@ async function persistAnimeRecord({
     !scrapedData.titleJp &&
     !normalizeTitleSynonyms(scrapedData.titleSynonyms);
 
+  const nextCoverImage = choosePreferredImage(candidateCoverImage, existing?.coverImage);
+  const nextCoverImageSource = resolveStoredImageSource({
+    origin: coverImageOrigin,
+    finalUrl: nextCoverImage,
+    storedStorageKind: downloadedCoverImage?.storage,
+    existingUrl: existing?.coverImage,
+    existingSource:
+      existing?.coverImageSource ?? inferExistingImageSource(existing?.coverImage),
+  });
+  const nextBannerImage =
+    choosePreferredImage(
+      candidateBannerImage,
+      clearStaleAnimeOnlyMetadata ? null : existing?.bannerImage
+    ) ?? nextCoverImage;
+  const nextBannerImageSource = resolveStoredImageSource({
+    origin: bannerImageOrigin,
+    finalUrl: nextBannerImage,
+    storedStorageKind: downloadedBannerImage?.storage,
+    existingUrl: existing?.bannerImage,
+    existingSource:
+      existing?.bannerImageSource ?? inferExistingImageSource(existing?.bannerImage),
+    fallbackSource: nextBannerImage === nextCoverImage ? nextCoverImageSource : null,
+  });
+
   const payload = {
     title: normalizedTitle,
     titleEnglish: normalizedTitleEnglish,
@@ -423,12 +486,14 @@ async function persistAnimeRecord({
       (clearStaleAnimeOnlyMetadata ? null : (existing?.titleJp ?? undefined)),
     titleSynonyms: clearStaleAnimeOnlyMetadata ? null : normalizedTitleSynonyms,
     synopsis: normalizedSynopsis || existing?.synopsis || "",
-    coverImage: choosePreferredImage(savedCoverImage, existing?.coverImage),
-    bannerImage:
-      choosePreferredImage(
-        savedBannerImage,
-        clearStaleAnimeOnlyMetadata ? null : existing?.bannerImage
-      ) ?? choosePreferredImage(savedCoverImage, existing?.coverImage),
+    coverImage: nextCoverImage,
+    coverImageSource: nextCoverImageSource,
+    bannerImage: nextBannerImage,
+    bannerImageSource: nextBannerImageSource,
+    metadataSource: resolveMetadataSource({
+      currentSource: metadataSource,
+      existingSource: clearStaleAnimeOnlyMetadata ? null : existing?.metadataSource,
+    }),
     status: normalizedStatus,
     type: scrapedData.type,
     episodesCount: normalizedEpisodesCount,
@@ -590,9 +655,10 @@ export async function runScrapeAnimeOperation(input: {
     return { success: false, error: "Failed to scrape anime" };
   }
 
+  const enrichment = await enrichAnimeMetadata(scrapedData);
   const enrichedData = mergeScrapedAndEnrichedAnime(
     scrapedData,
-    await enrichAnimeMetadata(scrapedData)
+    enrichment.data
   );
   const scrapedEpisodes = await provider.scrapeAnimeEpisodes(input.slug);
   const result = await persistAnimeRecord({
@@ -600,6 +666,15 @@ export async function runScrapeAnimeOperation(input: {
     source: input.source,
     slug: input.slug,
     scrapedData: enrichedData,
+    metadataSource: enrichment.source,
+    coverImageOrigin: determineImageOrigin(
+      scrapedData.coverImage,
+      enrichment.data.coverImage
+    ),
+    bannerImageOrigin: determineImageOrigin(
+      scrapedData.bannerImage,
+      enrichment.data.bannerImage
+    ),
     options: input.options,
   });
 
@@ -626,9 +701,10 @@ export async function runImportFromSourceOperation(input: {
   }
 
   const canonicalSlug = normalizeStoredSlug(scrapedData.slug || input.slug);
+  const enrichment = await enrichAnimeMetadata(scrapedData);
   const enrichedData = mergeScrapedAndEnrichedAnime(
     scrapedData,
-    await enrichAnimeMetadata(scrapedData)
+    enrichment.data
   );
 
   const scrapedEpisodes = input.importEpisodes
@@ -650,6 +726,15 @@ export async function runImportFromSourceOperation(input: {
       ...enrichedData,
       episodesCount: scrapedEpisodes.length || enrichedData.episodesCount,
     },
+    metadataSource: enrichment.source,
+    coverImageOrigin: determineImageOrigin(
+      scrapedData.coverImage,
+      enrichment.data.coverImage
+    ),
+    bannerImageOrigin: determineImageOrigin(
+      scrapedData.bannerImage,
+      enrichment.data.bannerImage
+    ),
     options: input.options,
   });
 
@@ -722,9 +807,10 @@ export async function runRefreshAnimeMetadataOperation(input: {
   };
 
   const mergedData = { ...baseData, ...(scrapedData ?? {}) };
+  const enrichment = await enrichAnimeMetadata(mergedData);
   const enrichedData = mergeScrapedAndEnrichedAnime(
     mergedData,
-    await enrichAnimeMetadata(mergedData)
+    enrichment.data
   );
 
   const result = await persistAnimeRecord({
@@ -735,6 +821,15 @@ export async function runRefreshAnimeMetadataOperation(input: {
       ...enrichedData,
       episodesCount: current.episodesCount ?? enrichedData.episodesCount,
     },
+    metadataSource: enrichment.source,
+    coverImageOrigin: determineImageOrigin(
+      mergedData.coverImage,
+      enrichment.data.coverImage
+    ),
+    bannerImageOrigin: determineImageOrigin(
+      mergedData.bannerImage,
+      enrichment.data.bannerImage
+    ),
     options: input.options,
   });
 

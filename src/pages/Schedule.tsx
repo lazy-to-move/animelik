@@ -280,7 +280,7 @@ function ScheduleDaySection({
                 </div>
 
                 <div className="mt-4 flex items-center gap-4 text-sm text-[#f0c75e]">
-                  <span>{item.score ? `${item.score} ★` : "No score"}</span>
+                  <span>{item.score ? `${item.score} score` : "No score"}</span>
                   <span className="text-[#8f86ab]">{item.episodesCount ? `${item.episodesCount} eps` : "Ongoing"}</span>
                 </div>
               </div>

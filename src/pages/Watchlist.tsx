@@ -198,12 +198,17 @@ export default function Watchlist() {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search your watchlist by anime title, english title, or genre..."
+              aria-label="Search your watchlist"
               className="w-full rounded-2xl border border-white/10 bg-white/5 py-3.5 pl-12 pr-4 text-white placeholder:text-[#59536b] focus:border-[#693def] focus:outline-none focus:ring-1 focus:ring-[#693def]"
             />
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row">
+            <label htmlFor="watchlist-sort" className="sr-only">
+              Sort your watchlist
+            </label>
             <select
+              id="watchlist-sort"
               value={sortBy}
               onChange={(event) => setSortBy(event.target.value as SortKey)}
               className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white focus:border-[#693def] focus:outline-none"
@@ -358,6 +363,7 @@ export default function Watchlist() {
                             min={0}
                             max={item.animeEpisodesCount || undefined}
                             inputMode="numeric"
+                            aria-label={`Progress episode for ${item.animeTitle}`}
                             value={draftValue ?? String(item.currentEpisode ?? 0)}
                             onChange={(event) =>
                               setEpisodeDrafts((current) => ({
@@ -401,6 +407,7 @@ export default function Watchlist() {
 
                         <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
                           <select
+                            aria-label={`Watch status for ${item.animeTitle}`}
                             value={item.status || "watching"}
                             onChange={(event) =>
                               updateMutation.mutate({

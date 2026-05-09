@@ -25,7 +25,7 @@ export const userRoleEnum = pgEnum("role", ["user", "admin"]);
 export const animeStatusEnum = pgEnum("anime_status", ["ongoing", "completed", "upcoming"]);
 export const animeTypeEnum = pgEnum("anime_type", ["tv", "movie", "ova", "special"]);
 export const watchlistStatusEnum = pgEnum("watchlist_status", ["watching", "completed", "plan_to_watch", "dropped"]);
-export const scrapeJobTypeEnum = pgEnum("scrape_job_type", ["import_from_source", "sync_all_episodes", "refresh_anime_metadata"]);
+export const scrapeJobTypeEnum = pgEnum("scrape_job_type", ["import_from_source", "sync_all_episodes", "refresh_anime_metadata", "queue_probe"]);
 export const scrapeJobStatusEnum = pgEnum("scrape_job_status", ["pending", "running", "completed", "failed"]);
 
 export const users = pgTable("users", {
@@ -68,7 +68,10 @@ export const anime = pgTable("anime", {
   slug: varchar("slug", { length: 255 }).notNull().unique(),
   synopsis: text("synopsis").notNull(),
   coverImage: varchar("coverImage", { length: 500 }),
+  coverImageSource: varchar("coverImageSource", { length: 50 }),
   bannerImage: varchar("bannerImage", { length: 500 }),
+  bannerImageSource: varchar("bannerImageSource", { length: 50 }),
+  metadataSource: varchar("metadataSource", { length: 50 }),
   status: animeStatusEnum("status").default("upcoming"),
   type: animeTypeEnum("type").default("tv"),
   rating: varchar("rating", { length: 10 }),
@@ -108,6 +111,7 @@ export type InsertAnimeGenre = typeof animeGenres.$inferInsert;
 export const episodes = pgTable("episodes", {
   id: serial("id").primaryKey(),
   animeId: integer("animeId").notNull().references(() => anime.id),
+  seasonNumber: integer("seasonNumber"),
   number: integer("number").notNull(),
   title: varchar("title", { length: 255 }),
   synopsis: text("synopsis"),
@@ -182,6 +186,7 @@ export type ScrapeJobPayload = {
   slug?: string;
   importEpisodes?: boolean;
   animeId?: number;
+  probeId?: string;
 };
 
 export type ScrapeJobResult = {

@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "legacyBaseUrl": "http://127.0.0.1:3310",
+  "publicBaseUrl": "http://127.0.0.1:3311",
+  "slug": "video-229",
+  "completedChecks": [
+    "redirect:/browse",
+    "redirect:/anime/video-229?from=cutover",
+    "redirect-follow:/browse",
+    "legacy-admin",
+    "legacy-api",
+    "seo-origin"
+  ]
+}

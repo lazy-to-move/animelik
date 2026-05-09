@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "baseUrl": "http://127.0.0.1:3401",
+  "email": "next-admin-smoke@synx.local",
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "completedChecks": [
+    "admin-login",
+    "admin-overview",
+    "admin-anime-catalog",
+    "admin-episode-create",
+    "admin-episode-delete",
+    "admin-category-create",
+    "admin-category-delete",
+    "admin-reports",
+    "admin-scraper"
+  ]
+}

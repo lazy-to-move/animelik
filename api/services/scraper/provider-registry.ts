@@ -67,6 +67,38 @@ const genericConfigs: Record<Exclude<SourceSiteId, "witanime" | "stardima">, Gen
     latestUrl: "https://ristoanime.co/",
     animePathSegment: "/series/",
     episodePathSegment: "/episode/",
+    titleSelectors: [".PostTitle", "h1", ".anime-details-title", ".anime-title", "[class*='title']"],
+    synopsisSelectors: [".StoryArea p", ".StoryArea", ".content", ".story", ".anime-story", "[class*='description']"],
+    coverImageSelectors: [".InnerPoster img", ".Poster img", ".singleCover .BG"],
+    ratingSelectors: [".imdbRBox span", "[class*='rating']", ".anime-rating", ".score", "[class*='score']"],
+    paginationMode: "rel-next",
+    isEpisodeUrl: (absoluteHref, animeSlug) => {
+      const safeDecode = (value: string) => {
+        try {
+          return decodeURIComponent(value).toLowerCase();
+        } catch {
+          return value.toLowerCase();
+        }
+      };
+
+      const normalizedHref = safeDecode(absoluteHref);
+      const normalizedSlug = safeDecode(animeSlug)
+        .replace(/\/+$/, "")
+        .replace(/-+/g, " ")
+        .trim();
+
+      if (!normalizedHref.startsWith("https://ristoanime.co/")) return false;
+      if (normalizedHref.includes("/series/")) return false;
+      if (!normalizedHref.includes("الحلقة")) return false;
+
+      const slugTokens = normalizedSlug
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3)
+        .filter((token) => token !== "جميع" && token !== "حلقات" && token !== "انمي" && token !== "مترجمة");
+
+      return slugTokens.some((token) => normalizedHref.includes(token));
+    },
     searchUrls: [
       (query) => `https://ristoanime.co/?s=${encodeURIComponent(query)}`,
       (query) => `https://ristoanime.co/?search_param=animes&s=${encodeURIComponent(query)}`,

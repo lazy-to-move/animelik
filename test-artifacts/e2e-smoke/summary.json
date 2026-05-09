@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "completedChecks": [
+    "home",
+    "privacy",
+    "terms",
+    "signup-validation",
+    "signup-success",
+    "settings-authenticated",
+    "watchlist-add",
+    "responsive-widths",
+    "admin-login"
+  ]
+}

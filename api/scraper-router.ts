@@ -2,30 +2,36 @@ import { inArray } from "drizzle-orm";
 import { z } from "zod";
 import { anime } from "@db/schema";
 import { createRouter, adminQuery, publicQuery } from "./middleware";
+import { isScraperQueueMode } from "./lib/scraper-execution";
 import { getDb } from "./queries/connection";
-import {
-  getScraperProvider,
-  listScraperProviders,
-} from "./services/scraper/provider-registry";
-import { SOURCE_SITE_IDS } from "./services/scraper/types";
-import {
-  getScraperExecutionMessage,
-  getScraperExecutionMode,
-  isScraperQueueMode,
-} from "./lib/scraper-execution";
 import {
   enqueueScrapeJob,
   listRecentScrapeJobs,
 } from "./services/scraper/job-queue";
 import {
-  runImportFromSourceOperation,
-  runRefreshAnimeMetadataOperation,
   runScrapeAnimeOperation,
-  runSyncAllEpisodesOperation,
   runSyncEpisodeSourcesOperation,
 } from "./services/scraper/operations";
-
-const sourceSiteSchema = z.enum(SOURCE_SITE_IDS);
+import {
+  getAdminScraperExecutionDetails,
+  getLatestAnimeFromSource,
+  latestSourceQuerySchema,
+  listAdminScraperSources,
+  searchAnimeFromSource,
+  searchSourceQuerySchema,
+  sourceSiteSchema,
+} from "./services/admin-scraper-read-service";
+import {
+  animeAdminActionSchema,
+  importFromSourceAdminSchema,
+  importFromSourceForAdmin,
+  refreshAnimeMetadataForAdmin,
+  syncAllEpisodesForAdmin,
+} from "./services/admin-scraper-service";
+import {
+  queueProbeAdminSchema,
+  runQueueProbeForAdmin,
+} from "./services/admin-scraper-queue-service";
 
 function normalizeStoredSlug(slug: string) {
   return slug.trim().replace(/^\/+|\/+$/g, "");
@@ -68,7 +74,7 @@ export const scraperRouter = createRouter({
 
           return queuedResponse(
             job.id,
-            "Anime scrape was queued for the background worker."
+            "Anime scrape was queued for the background worker.",
           );
         }
 
@@ -94,23 +100,13 @@ export const scraperRouter = createRouter({
     }),
 
   syncAllEpisodes: adminQuery
-    .input(z.object({ animeId: z.number() }))
+    .input(animeAdminActionSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        if (isScraperQueueMode()) {
-          const job = await enqueueScrapeJob({
-            type: "sync_all_episodes",
-            payload: { animeId: input.animeId },
-            requestedByUserId: ctx.user.id,
-          });
-
-          return queuedResponse(
-            job.id,
-            "Episode source sync was queued for the background worker."
-          );
-        }
-
-        return await runSyncAllEpisodesOperation(input);
+        return await syncAllEpisodesForAdmin({
+          userId: ctx.user.id,
+          animeId: input.animeId,
+        });
       } catch (error) {
         console.error("Error in syncAllEpisodes:", error);
         return { success: false, error: getErrorMessage(error) };
@@ -118,41 +114,38 @@ export const scraperRouter = createRouter({
     }),
 
   refreshAnimeMetadata: adminQuery
-    .input(z.object({ animeId: z.number() }))
+    .input(animeAdminActionSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        if (isScraperQueueMode()) {
-          const job = await enqueueScrapeJob({
-            type: "refresh_anime_metadata",
-            payload: { animeId: input.animeId },
-            requestedByUserId: ctx.user.id,
-          });
-
-          return queuedResponse(
-            job.id,
-            "Metadata refresh was queued for the background worker."
-          );
-        }
-
-        return await runRefreshAnimeMetadataOperation(input);
+        return await refreshAnimeMetadataForAdmin({
+          userId: ctx.user.id,
+          animeId: input.animeId,
+        });
       } catch (error) {
         console.error("Error in refreshAnimeMetadata:", error);
         return { success: false, error: getErrorMessage(error) };
       }
     }),
 
+  runQueueProbe: adminQuery
+    .input(queueProbeAdminSchema.optional())
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await runQueueProbeForAdmin({
+          userId: ctx.user.id,
+          probeId: input?.probeId,
+        });
+      } catch (error) {
+        console.error("Error in runQueueProbe:", error);
+        return { success: false, error: getErrorMessage(error) };
+      }
+    }),
+
   getLatestFromSource: adminQuery
-    .input(
-      z.object({
-        source: sourceSiteSchema.default("witanime"),
-        limit: z.number().default(20),
-      })
-    )
+    .input(latestSourceQuerySchema)
     .query(async ({ input }) => {
       try {
-        const provider = getScraperProvider(input.source);
-        const latest = await provider.scrapeLatestAnime(input.limit);
-        return { success: true, data: latest };
+        return await getLatestAnimeFromSource(input);
       } catch (error) {
         console.error("Error in getLatestFromSource:", error);
         return { success: false, error: getErrorMessage(error), data: [] };
@@ -160,17 +153,10 @@ export const scraperRouter = createRouter({
     }),
 
   searchSource: adminQuery
-    .input(
-      z.object({
-        source: sourceSiteSchema.default("witanime"),
-        query: z.string(),
-      })
-    )
+    .input(searchSourceQuerySchema)
     .query(async ({ input }) => {
       try {
-        const provider = getScraperProvider(input.source);
-        const results = await provider.searchAnime(input.query);
-        return { success: true, data: results };
+        return await searchAnimeFromSource(input);
       } catch (error) {
         console.error("Error in searchSource:", error);
         return { success: false, error: getErrorMessage(error), data: [] };
@@ -178,37 +164,13 @@ export const scraperRouter = createRouter({
     }),
 
   importFromSource: adminQuery
-    .input(
-      z.object({
-        source: sourceSiteSchema.default("witanime"),
-        slug: z.string(),
-        importEpisodes: z.boolean().default(true),
-      })
-    )
+    .input(importFromSourceAdminSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        const slug = normalizeStoredSlug(input.slug);
-
-        if (isScraperQueueMode()) {
-          const job = await enqueueScrapeJob({
-            type: "import_from_source",
-            payload: {
-              source: input.source,
-              slug,
-              importEpisodes: input.importEpisodes,
-            },
-            requestedByUserId: ctx.user.id,
-          });
-
-          return queuedResponse(
-            job.id,
-            "Import job was queued for the background worker."
-          );
-        }
-
-        return await runImportFromSourceOperation({
+        return await importFromSourceForAdmin({
+          userId: ctx.user.id,
           source: input.source,
-          slug,
+          slug: input.slug,
           importEpisodes: input.importEpisodes,
         });
       } catch (error) {
@@ -218,12 +180,7 @@ export const scraperRouter = createRouter({
     }),
 
   getExecutionMode: adminQuery.query(() => {
-    const mode = getScraperExecutionMode();
-    return {
-      mode,
-      queued: mode === "queue",
-      message: getScraperExecutionMessage(),
-    };
+    return getAdminScraperExecutionDetails();
   }),
 
   listScrapeJobs: adminQuery
@@ -263,7 +220,11 @@ export const scraperRouter = createRouter({
 
         return {
           ...job,
+          probeId: job.payload?.probeId ?? null,
           label:
+            job.type === "queue_probe"
+              ? `Queue probe ${job.payload?.probeId ?? job.id}`
+              :
             relatedAnime?.title ??
             job.payload?.slug ??
             `${job.type.replace(/_/g, " ")}`,
@@ -276,7 +237,7 @@ export const scraperRouter = createRouter({
     }),
 
   getSources: publicQuery.query(() => {
-    return listScraperProviders();
+    return listAdminScraperSources();
   }),
 
   getAvailableServers: publicQuery.query(() => {

@@ -4,22 +4,12 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import fs from "fs";
 import path from "path";
 import { findAnimeCoverFile, getFileContentType } from "./imported-media";
+import {
+  buildPublicWebRedirectTarget,
+  isLegacyFrontendRoute,
+} from "./public-web";
 
 type App = Hono<{ Bindings: HttpBindings }>;
-
-function isKnownFrontendRoute(pathname: string): boolean {
-  return [
-    /^\/$/,
-    /^\/browse$/,
-    /^\/schedule$/,
-    /^\/login$/,
-    /^\/signup$/,
-    /^\/watchlist$/,
-    /^\/admin$/,
-    /^\/anime\/[^/]+\/?$/,
-    /^\/watch\/[^/]+\/\d+\/?$/,
-  ].some(pattern => pattern.test(pathname));
-}
 
 export function serveStaticFiles(app: App) {
   const distPath = path.resolve(import.meta.dirname, "../dist/public");
@@ -42,9 +32,17 @@ export function serveStaticFiles(app: App) {
     if (!accept.includes("text/html")) {
       return c.json({ error: "Not Found" }, 404);
     }
+
+    if (c.req.method === "GET" || c.req.method === "HEAD") {
+      const redirectTarget = buildPublicWebRedirectTarget(c.req.url);
+      if (redirectTarget) {
+        return c.redirect(redirectTarget, 307);
+      }
+    }
+
     const indexPath = path.resolve(distPath, "index.html");
     const content = fs.readFileSync(indexPath, "utf-8");
     const pathname = new URL(c.req.url).pathname;
-    return c.html(content, isKnownFrontendRoute(pathname) ? 200 : 404);
+    return c.html(content, isLegacyFrontendRoute(pathname) ? 200 : 404);
   });
 }
