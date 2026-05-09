@@ -1,6 +1,6 @@
 require("dotenv/config");
 
-const { Pool } = require("pg");
+const { makeScriptPool } = require("./db/script-pool.cjs");
 
 async function setup() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -18,9 +18,7 @@ async function setup() {
   const adminUrl = new URL(databaseUrl);
   adminUrl.pathname = "/postgres";
 
-  const pool = new Pool({
-    connectionString: adminUrl.toString(),
-  });
+  const pool = makeScriptPool(adminUrl.toString());
 
   await pool.query(`CREATE DATABASE "${dbName}"`);
   await pool.end();

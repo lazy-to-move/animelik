@@ -1,9 +1,7 @@
 import "dotenv/config";
-import { Pool } from "pg";
+import { makeScriptPool } from "./db/script-pool.mjs";
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+const pool = makeScriptPool(process.env.DATABASE_URL ?? "");
 
 const categories = [
   ["Action", "action", "High-energy battles and intense sequences"],

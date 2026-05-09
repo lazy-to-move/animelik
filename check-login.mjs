@@ -1,10 +1,8 @@
 import "dotenv/config";
 import * as jose from "jose";
-import { Pool } from "pg";
+import { makeScriptPool } from "./db/script-pool.mjs";
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+const pool = makeScriptPool(process.env.DATABASE_URL ?? "");
 
 const unionId = process.env.DEV_UNION_ID ?? "dev-user";
 const email = process.env.DEV_EMAIL ?? "dev@localhost";

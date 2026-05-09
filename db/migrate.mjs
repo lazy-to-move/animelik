@@ -3,7 +3,7 @@ import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { Pool } from "pg";
+import { makeScriptPool } from "./script-pool.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -11,10 +11,7 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL is required to run migrations");
 }
 
-const pool = new Pool({
-  connectionString: databaseUrl,
-  max: 1,
-});
+const pool = makeScriptPool(databaseUrl, { max: 1 });
 
 const db = drizzle(pool);
 const migrationsFolder = resolve(

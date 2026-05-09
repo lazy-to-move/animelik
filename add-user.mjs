@@ -1,11 +1,9 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
-import { Pool } from "pg";
 import { hashPassword, normalizeEmail } from "./api/lib/passwords.ts";
+import { makeScriptPool } from "./db/script-pool.mjs";
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+const pool = makeScriptPool(process.env.DATABASE_URL ?? "");
 
 const email = normalizeEmail(process.env.ADMIN_EMAIL ?? "admin@synx.local");
 const password = process.env.ADMIN_PASSWORD ?? "ChangeMe!123456";

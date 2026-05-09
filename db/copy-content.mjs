@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Pool } from "pg";
+import { makeScriptPool } from "./script-pool.mjs";
 
 const sourceUrl = process.env.DATABASE_URL;
 const targetUrl = process.env.TARGET_DATABASE_URL;
@@ -31,16 +31,6 @@ const tables = TABLE_GROUPS[copyMode];
 
 if (!tables) {
   throw new Error(`Unsupported COPY_MODE "${copyMode}". Use "content" or "full".`);
-}
-
-function makePool(connectionString) {
-  const url = new URL(connectionString);
-  const useSsl = /render\.com$/i.test(url.hostname) || /render\.com$/i.test(url.host);
-
-  return new Pool({
-    connectionString,
-    ssl: useSsl ? { rejectUnauthorized: false } : undefined,
-  });
 }
 
 function quoteIdentifier(value) {
@@ -113,8 +103,8 @@ async function copyTable(source, target, table) {
   return rows.length;
 }
 
-const source = makePool(sourceUrl);
-const target = makePool(targetUrl);
+const source = makeScriptPool(sourceUrl);
+const target = makeScriptPool(targetUrl);
 
 try {
   await target.query("BEGIN");

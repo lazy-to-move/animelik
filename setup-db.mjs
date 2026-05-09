@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Pool } from "pg";
+import { makeScriptPool } from "./db/script-pool.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -16,9 +16,7 @@ if (!dbName) {
 const adminUrl = new URL(databaseUrl);
 adminUrl.pathname = "/postgres";
 
-const adminPool = new Pool({
-  connectionString: adminUrl.toString(),
-});
+const adminPool = makeScriptPool(adminUrl.toString());
 
 await adminPool.query(`CREATE DATABASE "${dbName}"`);
 await adminPool.end();
