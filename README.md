@@ -110,6 +110,29 @@ If your database is running on the host machine instead of inside the same Docke
 
 The Docker image now includes the Linux libraries Puppeteer needs for scraping, bundles the runtime-downloaded `public/anime-covers` assets, and keeps the Puppeteer browser cache inside the app image.
 
+## Railway Deployment
+
+Railway is the recommended host for this project because it fits the current architecture well:
+
+- long-running Node web service
+- PostgreSQL service in the same project
+- Dockerfile-based deploy
+- background scraper scheduler support
+
+The repository includes [railway.toml](</C:/Users/Expert Gaming/Downloads/projects/Kimi_Agent_Full-Stack Anime Streaming Site/app/railway.toml>) with:
+
+- Dockerfile builds
+- `npm run db:migrate` as a pre-deploy step
+- `/healthz` healthcheck
+
+After authenticating the Railway CLI, the typical flow is:
+
+```powershell
+npx @railway/cli init
+npx @railway/cli deploy -t postgres
+npx @railway/cli up
+```
+
 ## Admin Workflow
 
 Use `/admin` as an admin user to:
