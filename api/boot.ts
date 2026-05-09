@@ -8,7 +8,6 @@ import { env } from "./lib/env";
 import { startScheduler } from "./services/scraper/scheduler";
 import { getDb } from "./queries/connection";
 import { anime } from "@db/schema";
-import { isTrustedMutationOrigin } from "./lib/origin";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
@@ -75,9 +74,6 @@ app.get("/sitemap.xml", async c => {
   return c.body(xml);
 });
 app.use("/api/trpc/*", async c => {
-  if (!isTrustedMutationOrigin(c.req.raw, env.siteUrl)) {
-    return c.json({ error: "Untrusted request origin." }, 403);
-  }
   return fetchRequestHandler({
     endpoint: "/api/trpc",
     req: c.req.raw,

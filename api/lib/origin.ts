@@ -10,12 +10,35 @@ function safeOrigin(url: string | null | undefined): string | null {
   }
 }
 
+function firstHeaderValue(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  const first = value
+    .split(",")[0]
+    ?.trim();
+
+  return first || null;
+}
+
+function getForwardedRequestOrigin(req: Request): string | null {
+  const proto = firstHeaderValue(req.headers.get("x-forwarded-proto"));
+  const host =
+    firstHeaderValue(req.headers.get("x-forwarded-host")) ??
+    firstHeaderValue(req.headers.get("host"));
+
+  if (!proto || !host) return null;
+
+  return safeOrigin(`${proto}://${host}`);
+}
+
 export function getTrustedRequestOrigins(req: Request, siteUrl?: string): string[] {
   const origins = new Set<string>();
   const requestOrigin = safeOrigin(req.url);
+  const forwardedOrigin = getForwardedRequestOrigin(req);
   const configuredOrigin = safeOrigin(siteUrl);
 
   if (requestOrigin) origins.add(requestOrigin);
+  if (forwardedOrigin) origins.add(forwardedOrigin);
   if (configuredOrigin) origins.add(configuredOrigin);
 
   return [...origins];

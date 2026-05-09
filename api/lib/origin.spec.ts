@@ -40,6 +40,24 @@ describe("origin helpers", () => {
     expect(isTrustedMutationOrigin(req)).toBe(true);
   });
 
+  it("trusts proxy-forwarded public origins for cookie-authenticated mutations", () => {
+    const req = new Request("http://127.0.0.1:10000/api/trpc/test", {
+      method: "POST",
+      headers: {
+        cookie: "kimi_sid=test",
+        origin: "https://synx-app.onrender.com",
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "synx-app.onrender.com",
+      },
+    });
+
+    expect(getTrustedRequestOrigins(req)).toEqual([
+      "http://127.0.0.1:10000",
+      "https://synx-app.onrender.com",
+    ]);
+    expect(isTrustedMutationOrigin(req)).toBe(true);
+  });
+
   it("blocks mismatched origins for cookie-authenticated mutation requests", () => {
     const req = new Request("https://app.example.com/api/trpc/test", {
       method: "POST",
