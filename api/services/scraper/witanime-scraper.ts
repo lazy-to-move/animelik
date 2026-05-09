@@ -32,115 +32,6 @@ const FETCH_HEADERS = {
   Referer: BASE_URL,
 };
 
-type ProcessedEpisodeRecord = {
-  number?: string | number;
-  url?: string;
-  type?: string;
-  screenshot?: string;
-};
-
-function decodeHtmlEntities(value: string): string {
-  return value
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&quot;/gi, '"')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function stripTags(value: string): string {
-  return decodeHtmlEntities(value.replace(/<[^>]+>/g, ' '));
-}
-
-function extractFirst(html: string, pattern: RegExp): string | undefined {
-  const match = html.match(pattern);
-  return match?.[1] ? decodeHtmlEntities(match[1]) : undefined;
-}
-
-function extractInfoValue(html: string, label: string): string | undefined {
-  const pattern = new RegExp(
-    `<div class="anime-info"><span>${escapeRegExp(label)}:<\\/span>\\s*(?:<a[^>]*>)?([\\s\\S]*?)(?:<\\/a>)?<\\/div>`,
-    'i',
-  );
-
-  return extractFirst(html, pattern);
-}
-
-async function fetchHtmlDocument(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url, { headers: FETCH_HEADERS });
-    if (!response.ok) return null;
-
-    const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
-    if (!contentType.includes('html')) return null;
-
-    return await response.text();
-  } catch (error) {
-    console.error(`Failed to fetch HTML document: ${url}`, error);
-    return null;
-  }
-}
-
-function decodeProcessedEpisodeData(encoded: string): ProcessedEpisodeRecord[] {
-  const [encodedPayload, encodedKey] = encoded.split('.');
-  if (!encodedPayload || !encodedKey) return [];
-
-  try {
-    const payload = Buffer.from(encodedPayload, 'base64').toString('latin1');
-    const key = Buffer.from(encodedKey, 'base64').toString('latin1');
-
-    let decoded = '';
-    for (let i = 0; i < payload.length; i++) {
-      decoded += String.fromCharCode(
-        payload.charCodeAt(i) ^ key.charCodeAt(i % key.length),
-      );
-    }
-
-    const parsed = JSON.parse(decoded);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    console.error('Failed to decode processed episode data:', error);
-    return [];
-  }
-}
-
-function extractEpisodesFromHtml(html: string): WitanimeEpisode[] {
-  const encodedEpisodes = html.match(/var\s+processedEpisodeData\s*=\s*'([^']+)'/i)?.[1];
-  if (!encodedEpisodes) return [];
-
-  return decodeProcessedEpisodeData(encodedEpisodes)
-    .map((episode, index) => {
-      const episodeUrl = normalizeAbsoluteUrl(episode.url);
-      if (!episodeUrl) return null;
-
-      const episodePath = new URL(episodeUrl).pathname;
-      const episodeId = episodePath.split('/episode/')[1]?.replace(/^\/+|\/+$/g, '');
-      if (!episodeId) return null;
-
-      const number = Number.parseInt(String(episode.number ?? index + 1), 10);
-      if (!Number.isFinite(number) || number <= 0) return null;
-
-      const typeLabel = decodeHtmlEntities(episode.type ?? 'Episode');
-
-      return {
-        id: episodeId,
-        number,
-        title: `${typeLabel} ${number}`,
-        thumbnail: normalizeAbsoluteUrl(episode.screenshot),
-        sources: [],
-      } satisfies WitanimeEpisode;
-    })
-    .filter((episode): episode is WitanimeEpisode => episode !== null)
-    .sort((a, b) => a.number - b.number);
-}
-
 function decodeBase64Url(value: string): string | null {
   if (!value) return null;
 
@@ -333,14 +224,6 @@ async function waitForIframeChange(page: Page, previousSrc: string, timeout = 16
 }
 
 export async function scrapeAnimeEpisodes(animeSlug: string): Promise<WitanimeEpisode[]> {
-  const html = await fetchHtmlDocument(`${BASE_URL}/anime/${animeSlug}`);
-  if (html) {
-    const htmlEpisodes = extractEpisodesFromHtml(html);
-    if (htmlEpisodes.length > 0) {
-      return htmlEpisodes;
-    }
-  }
-
   const b = await getBrowser();
   const page = await b.newPage();
 
@@ -398,38 +281,6 @@ export async function scrapeAnimeEpisodes(animeSlug: string): Promise<WitanimeEp
 }
 
 export async function scrapeAnimeInfo(slug: string): Promise<WitanimeAnime | null> {
-  const html = await fetchHtmlDocument(`${BASE_URL}/anime/${slug}`);
-  if (html) {
-    const title = extractFirst(html, /<h1 class="anime-details-title">([\s\S]*?)<\/h1>/i);
-    const synopsis = extractFirst(html, /<p class="anime-story">([\s\S]*?)<\/p>/i);
-    const coverImage = normalizeAbsoluteUrl(
-      html.match(/<div class="anime-thumbnail">[\s\S]*?<img[^>]+src="([^"]+)"/i)?.[1],
-    );
-    const typeText = extractInfoValue(html, 'النوع');
-    const yearText = extractInfoValue(html, 'بداية العرض');
-    const statusText = extractInfoValue(html, 'حالة الأنمي');
-    const genres = [...html.matchAll(/<ul class="anime-genres">[\s\S]*?<\/ul>/gi)]
-      .flatMap(match => [...match[0].matchAll(/<a[^>]*>([\s\S]*?)<\/a>/gi)].map(item => stripTags(item[1])))
-      .filter(Boolean);
-    const yearMatch = yearText?.match(/(\d{4})/);
-    const htmlEpisodes = extractEpisodesFromHtml(html);
-
-    if (title) {
-      return {
-        slug,
-        // eslint-disable-next-line no-irregular-whitespace
-        title: title.replace(/Ã˜Â§Ã™â€ Ã™â€¦Ã™Å |Ã˜Â£Ã™â€ Ã™â€¦Ã™Å /g, '').trim(),
-        synopsis: synopsis?.slice(0, 2000) ?? '',
-        coverImage,
-        status: toStatus((statusText ?? '').toLowerCase()),
-        type: toType((typeText ?? '').toLowerCase()),
-        episodesCount: Math.min(htmlEpisodes.length, 500),
-        releaseYear: yearMatch ? parseInt(yearMatch[1], 10) : undefined,
-        categoryName: genres.join(' | ') || undefined,
-      };
-    }
-  }
-
   const b = await getBrowser();
   const page = await b.newPage();
 
