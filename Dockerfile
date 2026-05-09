@@ -56,6 +56,7 @@ ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
+COPY --from=build /app/db ./db
 COPY package.json start-prod.mjs ./
 RUN mkdir -p /app/public/anime-covers /var/data/anime-covers
 
