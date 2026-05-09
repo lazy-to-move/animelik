@@ -1,12 +1,13 @@
 import { useParams, Link, useNavigate } from "react-router";
 import {
   ChevronLeft, ChevronRight, Play, List, MessageSquare,
-  Star, Send, Settings, Globe,
+  Star, Send, Settings, Globe, Flag, Loader2, Maximize, Minimize,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AnimeArtwork from "@/components/AnimeArtwork";
+import EpisodeScrollRail from "@/components/EpisodeScrollRail";
 import MixedSynopsisText from "@/components/MixedSynopsisText";
 
 function normalizeAnimeSlug(slug?: string | null) {
@@ -89,6 +90,63 @@ function sortServers(servers: string[]) {
   });
 }
 
+function BrokenEpisodeReportPanel({
+  episodeId,
+  episodeNumber,
+}: {
+  episodeId: number;
+  episodeNumber: number;
+}) {
+  const utils = trpc.useUtils();
+  const reportStatusQuery = trpc.episode.brokenReportStatus.useQuery({ episodeId });
+  const reportMutation = trpc.episode.reportBroken.useMutation({
+    onSuccess: async () => {
+      await utils.episode.brokenReportStatus.invalidate({ episodeId });
+      await utils.dashboard.topBrokenEpisodes.invalidate();
+    },
+  });
+
+  const reportStatus = reportStatusQuery.data;
+  const canReport = reportStatus?.canReport ?? false;
+
+  return (
+    <div className="rounded-2xl border border-amber-400/15 bg-amber-300/[0.06] p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-200/70">Player Report</p>
+          <p className="text-sm font-medium text-[#efe6d1]">
+            If episode {episodeNumber} will not play, send one report every 24 hours.
+          </p>
+        </div>
+        <button
+          onClick={() => reportMutation.mutate({ episodeId })}
+          disabled={reportMutation.isPending || reportStatusQuery.isLoading || !canReport}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/10 px-4 py-2 text-sm font-bold text-amber-100 transition hover:bg-amber-300/20 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {reportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Flag className="h-4 w-4" />}
+          {canReport ? "Report Broken Episode" : "Already Reported Recently"}
+        </button>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs font-medium text-amber-100/80">
+        <span>{reportStatus?.reportsLast24h ?? 0} reports in 24h</span>
+        <span>{reportStatus?.totalReports ?? 0} total reports</span>
+        {!canReport && reportStatus?.nextReportAt && (
+          <span>Available again: {new Date(reportStatus.nextReportAt).toLocaleString()}</span>
+        )}
+      </div>
+
+      {reportMutation.isSuccess && (
+        <p className="mt-3 text-sm font-medium text-emerald-300">{reportMutation.data.message}</p>
+      )}
+
+      {reportMutation.isError && (
+        <p className="mt-3 text-sm font-medium text-red-300">{reportMutation.error.message}</p>
+      )}
+    </div>
+  );
+}
+
 export default function Watch() {
   const { slug, episodeNum } = useParams<{ slug: string; episodeNum: string }>();
   const navigate = useNavigate();
@@ -97,6 +155,10 @@ export default function Watch() {
   const [reviewRating, setReviewRating] = useState(8);
   const [preferredServer, setPreferredServer] = useState<string>("");
   const [preferredQuality, setPreferredQuality] = useState<VideoSource["quality"]>("hd");
+  const episodeSidebarRef = useRef<HTMLDivElement | null>(null);
+  const playerShellRef = useRef<HTMLDivElement | null>(null);
+  const nativeVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);
 
   const currentEpNum = Number(episodeNum) || 1;
 
@@ -163,6 +225,44 @@ export default function Watch() {
     return filteredSources[0];
   }, [filteredSources, selectedQuality]);
 
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      const fullscreenElement = document.fullscreenElement;
+      const playerShell = playerShellRef.current;
+      setIsPlayerFullscreen(Boolean(
+        fullscreenElement &&
+        playerShell &&
+        (fullscreenElement === playerShell || playerShell.contains(fullscreenElement))
+      ));
+    };
+
+    syncFullscreenState();
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreenState);
+    };
+  }, []);
+
+  const togglePlayerFullscreen = async () => {
+    const playerShell = playerShellRef.current;
+    if (!playerShell) return;
+
+    try {
+      if (
+        document.fullscreenElement &&
+        (document.fullscreenElement === playerShell || playerShell.contains(document.fullscreenElement))
+      ) {
+        await document.exitFullscreen();
+        return;
+      }
+
+      await playerShell.requestFullscreen();
+    } catch (error) {
+      console.error("Could not toggle player fullscreen", error);
+    }
+  };
+
   if (!anime) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#030209]">
@@ -180,7 +280,13 @@ export default function Watch() {
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_380px]">
           <div className="space-y-8">
             <div className="space-y-6">
-              <div className="relative aspect-video overflow-hidden rounded-3xl border border-white/5 bg-black shadow-[0_0_42px_rgba(105,61,239,0.12)]">
+              <div
+                ref={playerShellRef}
+                onDoubleClick={() => {
+                  void togglePlayerFullscreen();
+                }}
+                className="group relative aspect-video overflow-hidden rounded-3xl border border-white/5 bg-black shadow-[0_0_42px_rgba(105,61,239,0.12)]"
+              >
                 {hasSources && currentSource?.url ? (
                   <iframe
                     src={currentSource.url}
@@ -192,8 +298,12 @@ export default function Watch() {
                   />
                 ) : currentEpisode?.videoUrl ? (
                   <video
+                    ref={nativeVideoRef}
                     src={currentEpisode.videoUrl}
                     controls
+                    onDoubleClick={() => {
+                      void togglePlayerFullscreen();
+                    }}
                     className="h-full w-full object-contain"
                     poster={currentEpisode.thumbnail || anime.coverImage || undefined}
                   />
@@ -213,6 +323,20 @@ export default function Watch() {
                     </div>
                   </div>
                 )}
+
+                <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-end gap-3 bg-gradient-to-b from-black/65 via-black/15 to-transparent px-4 py-4 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void togglePlayerFullscreen();
+                    }}
+                    className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-black/35 text-white/85 backdrop-blur-sm transition hover:border-white/20 hover:bg-black/55 hover:text-white"
+                    aria-label={isPlayerFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                    title={isPlayerFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                  >
+                    {isPlayerFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+                  </button>
+                </div>
               </div>
 
               {hasSources && (
@@ -271,7 +395,28 @@ export default function Watch() {
                     </div>
                     <p className="text-xs font-medium text-[#6e6885]">Select a working host and quality for this episode.</p>
                   </div>
+
                 </div>
+              )}
+
+              {currentEpisode && (
+                user ? (
+                  <BrokenEpisodeReportPanel
+                    key={currentEpisode.id}
+                    episodeId={currentEpisode.id}
+                    episodeNumber={currentEpisode.number}
+                  />
+                ) : (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                    <p className="text-sm font-medium text-white">Spot a broken player?</p>
+                    <p className="mt-1 text-sm text-[#9d95b8]">
+                      <Link to="/login" className="font-semibold text-[#d9ccff] hover:text-white">
+                        Sign in
+                      </Link>{" "}
+                      to report this episode and help the admin team track repeated issues.
+                    </p>
+                  </div>
+                )
               )}
             </div>
 
@@ -437,44 +582,55 @@ export default function Watch() {
                 </div>
               </div>
 
-              <div className="max-h-[calc(100vh-320px)] space-y-3 overflow-y-auto pr-2 scroll-hide">
-                {episodeList?.map((episode) => (
-                  <button
-                    key={episode.id}
-                    onClick={() => navigate(`/watch/${animeSlug}/${episode.number}`)}
-                    className={`group flex w-full items-center gap-4 rounded-2xl border p-3 text-left transition-all duration-300 ${
-                      episode.number === currentEpNum
-                        ? "border-[#693def] bg-[#693def] shadow-xl shadow-[#693def]/20"
-                        : "border-transparent bg-white/5 hover:border-white/10 hover:bg-white/10"
-                    }`}
-                  >
-                    <div className="relative aspect-video w-24 flex-shrink-0 overflow-hidden rounded-xl">
-                      <AnimeArtwork
-                        src={episode.thumbnail || anime.coverImage}
-                        alt={`EP ${episode.number}`}
-                        title={anime.title}
-                        className="h-full w-full"
-                        imageClassName="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        fallbackClassName="h-full w-full"
-                      />
-                      <div className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity ${episode.number === currentEpNum ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
-                        <Play className={`h-5 w-5 text-white ${episode.number === currentEpNum ? "fill-white" : ""}`} />
+              <div className="flex items-stretch gap-3">
+                <div
+                  ref={episodeSidebarRef}
+                  className="max-h-[calc(100vh-320px)] flex-1 space-y-3 overflow-y-auto pr-1 scroll-hide sm:pr-2"
+                >
+                  {episodeList?.map((episode) => (
+                    <button
+                      key={episode.id}
+                      onClick={() => navigate(`/watch/${animeSlug}/${episode.number}`)}
+                      className={`group flex w-full items-center gap-4 rounded-2xl border p-3 text-left transition-all duration-300 ${
+                        episode.number === currentEpNum
+                          ? "border-[#693def] bg-[#693def] shadow-xl shadow-[#693def]/20"
+                          : "border-transparent bg-white/5 hover:border-white/10 hover:bg-white/10"
+                      }`}
+                    >
+                      <div className="relative aspect-video w-24 flex-shrink-0 overflow-hidden rounded-xl">
+                        <AnimeArtwork
+                          src={episode.thumbnail || anime.coverImage}
+                          alt={`EP ${episode.number}`}
+                          title={anime.title}
+                          className="h-full w-full"
+                          imageClassName="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                          fallbackClassName="h-full w-full"
+                        />
+                        <div className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity ${episode.number === currentEpNum ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+                          <Play className={`h-5 w-5 text-white ${episode.number === currentEpNum ? "fill-white" : ""}`} />
+                        </div>
                       </div>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className={`mb-1 text-[10px] font-black uppercase tracking-widest ${
-                        episode.number === currentEpNum ? "text-white/80" : "text-[#693def]"
-                      }`}>
-                        Episode {episode.number}
-                      </p>
-                      <p className={`truncate text-sm font-bold ${
-                        episode.number === currentEpNum ? "text-white" : "text-[#dddddd]"
-                      }`}>
-                        {episode.title || `Episode ${episode.number}`}
-                      </p>
-                    </div>
-                  </button>
-                ))}
+                      <div className="min-w-0 flex-1">
+                        <p className={`mb-1 text-[10px] font-black uppercase tracking-widest ${
+                          episode.number === currentEpNum ? "text-white/80" : "text-[#693def]"
+                        }`}>
+                          Episode {episode.number}
+                        </p>
+                        <p className={`truncate text-sm font-bold ${
+                          episode.number === currentEpNum ? "text-white" : "text-[#dddddd]"
+                        }`}>
+                          {episode.title || `Episode ${episode.number}`}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                <EpisodeScrollRail
+                  containerRef={episodeSidebarRef}
+                  itemCount={episodeList?.length ?? 0}
+                  footerText={`${episodeList?.length ?? 0} titles`}
+                />
               </div>
             </div>
           </div>

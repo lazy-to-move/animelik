@@ -4,14 +4,14 @@ import { motion } from "framer-motion";
 import {
   Shield, Users, Tv, Film, MessageSquare, Plus, Pencil, Trash2,
   X, Star, TrendingUp, Activity, ChevronRight, Search, BarChart3,
-  Layers, Save, Loader2, Download, RefreshCw, Globe, AlertCircle, type LucideIcon
+  Layers, Save, Loader2, Download, RefreshCw, Globe, AlertCircle, Flag, type LucideIcon
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import AnimeArtwork from "@/components/AnimeArtwork";
 import type { SourceSiteId } from "../../api/services/scraper/types";
 
-type Tab = "overview" | "anime" | "episodes" | "categories" | "scraper";
+type Tab = "overview" | "anime" | "episodes" | "categories" | "reports" | "scraper";
 
 type SourceSiteOption = {
   id: string;
@@ -814,27 +814,27 @@ function SyncEpisodesForm() {
 /* ─── Latest Anime List ─── */
 function LatestAnimeList() {
   const [source, setSource] = useState<SourceSiteId>("witanime");
-  const [loading, setLoading] = useState(false);
-  const [animeList, setAnimeList] = useState<LatestSourceAnime[]>([]);
-  const [fetched, setFetched] = useState(false);
+  const [fetchedSource, setFetchedSource] = useState<SourceSiteId | null>(null);
   const utils = trpc.useUtils();
   const { data: sources } = trpc.scraper.getSources.useQuery();
   const selectedSource = sources?.find((site) => site.id === source);
+  const latestQuery = trpc.scraper.getLatestFromSource.useQuery(
+    { source, limit: 20 },
+    {
+      enabled: false,
+      retry: false,
+    },
+  );
+  const animeList: LatestSourceAnime[] = latestQuery.data?.data ?? [];
+  const latestError =
+    latestQuery.error?.message ||
+    (latestQuery.data?.success === false ? latestQuery.data.error || "Could not fetch from source" : "");
+  const loading = latestQuery.isFetching;
+  const fetched = fetchedSource === source;
 
-  const fetchLatest = () => {
-    setLoading(true);
-    setFetched(true);
-    fetch("/api/trpc/scraper.getLatestFromSource?input=" + encodeURIComponent(JSON.stringify({ source, limit: 20 })))
-      .then(res => res.json())
-      .then(data => {
-        setLoading(false);
-        if (data.result?.data?.json?.success) {
-          setAnimeList(data.result.data.json.data || []);
-        }
-      })
-      .catch(() => {
-        setLoading(false);
-      });
+  const fetchLatest = async () => {
+    setFetchedSource(source);
+    await latestQuery.refetch();
   };
 
   const importMutation = trpc.scraper.importFromSource.useMutation({
@@ -867,13 +867,13 @@ function LatestAnimeList() {
       {animeList.length === 0 && fetched && !loading && (
         <div className="text-center py-8 text-[#888888]">
           <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
-          <p>No anime found or could not fetch from source</p>
+          <p>{latestError || "No anime found or could not fetch from source"}</p>
         </div>
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-        {animeList.map((item, idx) => (
-          <div key={idx} className="bg-white/5 rounded-lg p-3">
+        {animeList.map((item) => (
+          <div key={`${source}:${item.slug}`} className="bg-white/5 rounded-lg p-3">
             {item.coverImage && (
               <img src={item.coverImage} alt={item.title} className="w-full aspect-[2/3] object-cover rounded mb-2" />
             )}
@@ -912,6 +912,7 @@ export default function Admin() {
   const { data: stats } = trpc.dashboard.stats.useQuery(undefined, { enabled: isAdmin });
   const { data: recentUsers } = trpc.dashboard.recentUsers.useQuery(undefined, { enabled: isAdmin });
   const { data: recentAnime } = trpc.dashboard.recentAnime.useQuery(undefined, { enabled: isAdmin });
+  const { data: topBrokenEpisodes } = trpc.dashboard.topBrokenEpisodes.useQuery(undefined, { enabled: isAdmin });
   const { data: animeList } = trpc.anime.list.useQuery({ search: searchQuery || undefined, limit: 50 });
   const { data: categories } = trpc.category.list.useQuery();
   const resolvedSelectedAnimeId =
@@ -1046,6 +1047,7 @@ export default function Admin() {
     { key: "anime", label: "Anime", icon: Tv },
     { key: "episodes", label: "Episodes", icon: Film },
     { key: "categories", label: "Categories", icon: Layers },
+    { key: "reports", label: "Broken Episodes", icon: Flag },
     { key: "scraper", label: "Import Sources", icon: Download },
   ];
 
@@ -1147,6 +1149,7 @@ export default function Admin() {
                 </div>
               </div>
             </div>
+
           </motion.div>
         )}
 
@@ -1481,6 +1484,78 @@ export default function Admin() {
                   )}
                 </div>
               ))}
+            </div>
+          </motion.div>
+        )}
+
+
+        {/* Broken Reports Tab */}
+        {activeTab === "reports" && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+            <div className="glass-panel p-5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 className="flex items-center gap-2 text-lg font-bold text-white">
+                    <Flag className="w-5 h-5 text-amber-300" />
+                    Broken Episode Reports
+                  </h2>
+                  <p className="mt-1 text-sm text-[#9b93b8]">
+                    See which episodes users report as broken most often so you can resync or replace their sources.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-amber-300/15 bg-amber-300/10 px-4 py-3 text-sm font-semibold text-amber-100">
+                  {topBrokenEpisodes?.length ?? 0} reported episode{(topBrokenEpisodes?.length ?? 0) === 1 ? "" : "s"}
+                </div>
+              </div>
+            </div>
+
+            <div className="glass-panel p-5">
+              <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-white">
+                <Flag className="w-5 h-5 text-amber-300" />
+                Most Reported Broken Episodes
+              </h3>
+
+              {!topBrokenEpisodes || topBrokenEpisodes.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] py-10 text-center">
+                  <Flag className="mx-auto mb-3 h-8 w-8 text-white/25" />
+                  <p className="text-sm font-medium text-[#9b93b8]">No episode reports yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {topBrokenEpisodes.map((item) => (
+                    <div key={item.episodeId} className="flex flex-col gap-3 rounded-2xl border border-white/8 bg-white/[0.04] p-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-white">{item.animeTitle}</p>
+                        <p className="mt-1 truncate text-sm text-[#c9c1df]">
+                          Episode {item.episodeNumber}
+                          {item.episodeTitle ? ` - ${item.episodeTitle}` : ""}
+                        </p>
+                        <p className="mt-1 text-xs text-[#8f86ad]">
+                          Last report: {item.lastReportedAt ? new Date(item.lastReportedAt).toLocaleString() : "N/A"}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="rounded-xl border border-amber-300/15 bg-amber-300/10 px-3 py-2 text-center">
+                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-100/70">24h</p>
+                          <p className="text-lg font-black text-amber-100">{item.reportsLast24h}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-center">
+                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#9188b1]">Total</p>
+                          <p className="text-lg font-black text-white">{item.reportsCount}</p>
+                        </div>
+                        <Link
+                          to={`/watch/${item.animeSlug}/${item.episodeNumber}`}
+                          className="inline-flex items-center gap-2 rounded-xl bg-[#693def]/15 px-3 py-2 text-sm font-semibold text-[#d8cbff] transition hover:bg-[#693def]/25 hover:text-white"
+                        >
+                          Open
+                          <ChevronRight className="w-4 h-4" />
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </motion.div>
         )}

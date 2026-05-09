@@ -6,8 +6,9 @@ import {
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import AnimeArtwork from "@/components/AnimeArtwork";
+import EpisodeScrollRail from "@/components/EpisodeScrollRail";
 import MixedSynopsisText from "@/components/MixedSynopsisText";
 
 function normalizeAnimeSlug(slug?: string | null) {
@@ -19,6 +20,7 @@ export default function AnimeDetail() {
   const { user } = useAuth();
   const [reviewText, setReviewText] = useState("");
   const [reviewRating, setReviewRating] = useState(8);
+  const episodeListRef = useRef<HTMLDivElement | null>(null);
 
   const { data: anime, isLoading } = trpc.anime.bySlug.useQuery(
     { slug: slug || "" },
@@ -48,6 +50,11 @@ export default function AnimeDetail() {
   });
 
   const isInWatchlist = watchlistItems?.some((w) => w.animeId === anime?.id);
+  const subtitle = anime?.titleEnglish && anime.titleEnglish !== anime.title
+    ? anime.titleEnglish
+    : anime?.titleJp && anime.titleJp !== anime.title
+      ? anime.titleJp
+      : null;
 
   if (isLoading) {
     return (
@@ -126,7 +133,7 @@ export default function AnimeDetail() {
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-48 sm:-mt-64 relative z-10 pb-20">
-        <div className="grid lg:grid-cols-[320px_1fr] gap-12">
+        <div className="grid items-start gap-8 lg:grid-cols-[320px_minmax(0,1fr)] lg:gap-10 xl:gap-12">
           {/* Left: Poster & Actions */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -199,7 +206,7 @@ export default function AnimeDetail() {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.1 }}
-            className="pt-12 sm:pt-20"
+            className="lg:pt-2"
           >
             <div className="flex flex-wrap items-center gap-3 mb-4">
               <span className="px-3 py-1.5 rounded-lg bg-[#693def]/15 text-[#8257f2] text-[10px] font-black uppercase tracking-widest border border-[#693def]/20">
@@ -214,8 +221,8 @@ export default function AnimeDetail() {
             </div>
 
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white mb-2 tracking-tight leading-tight">{anime.title}</h1>
-            {anime.titleJp && (
-              <p className="text-xl sm:text-2xl text-[#8257f2] font-bold mb-6 tracking-wide opacity-80">{anime.titleJp}</p>
+            {subtitle && (
+              <p className="text-xl sm:text-2xl text-[#8257f2] font-bold mb-6 tracking-wide opacity-80">{subtitle}</p>
             )}
 
             <div className="flex items-center gap-6 mb-8 py-4 border-y border-white/5">
@@ -266,37 +273,48 @@ export default function AnimeDetail() {
                 <div className="w-2 h-8 bg-[#693def] rounded-full" />
                 Episodes
               </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto scroll-hide pr-2">
-                {episodeList?.map((ep) => (
-                  <Link
-                    key={ep.id}
-                    to={`/watch/${normalizeAnimeSlug(anime.slug)}/${ep.number}`}
-                    className="flex items-center gap-4 p-4 rounded-2xl bg-white/5 hover:bg-[#693def]/10 border border-white/5 hover:border-[#693def]/40 transition-all duration-300 group"
-                  >
-                    <div className="relative w-28 aspect-video rounded-xl overflow-hidden flex-shrink-0 shadow-lg">
-                      <AnimeArtwork
-                        src={ep.thumbnail || anime.coverImage}
-                        alt={ep.title ?? `الحلقة ${ep.number}`}
-                        title={anime.title}
-                        className="w-full h-full"
-                        imageClassName="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                        fallbackClassName="w-full h-full"
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                        <Play className="w-6 h-6 text-white fill-white" />
+              <div className="flex items-stretch gap-3 sm:gap-4">
+                <div
+                  ref={episodeListRef}
+                  className="grid flex-1 grid-cols-1 gap-3 max-h-[500px] overflow-y-auto pr-1 scroll-hide sm:grid-cols-2 sm:pr-2"
+                >
+                  {episodeList?.map((ep) => (
+                    <Link
+                      key={ep.id}
+                      to={`/watch/${normalizeAnimeSlug(anime.slug)}/${ep.number}`}
+                      className="flex items-center gap-4 p-4 rounded-2xl bg-white/5 hover:bg-[#693def]/10 border border-white/5 hover:border-[#693def]/40 transition-all duration-300 group"
+                    >
+                      <div className="relative w-28 aspect-video rounded-xl overflow-hidden flex-shrink-0 shadow-lg">
+                        <AnimeArtwork
+                          src={ep.thumbnail || anime.coverImage}
+                          alt={ep.title ?? `Episode ${ep.number}`}
+                          title={anime.title}
+                          className="w-full h-full"
+                          imageClassName="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                          fallbackClassName="w-full h-full"
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                          <Play className="w-6 h-6 text-white fill-white" />
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="mb-1 text-xs font-black tracking-widest text-[#693def]">الحلقة {ep.number}</p>
-                      <p className="text-[15px] font-bold text-white truncate group-hover:text-[#693def] transition-colors">
-                        {ep.title || `الحلقة ${ep.number}`}
-                      </p>
-                      <p className="text-xs text-[#777777] font-medium mt-1">
-                        {ep.duration ? `${Math.floor(ep.duration / 60)} min` : "?? min"}
-                      </p>
-                    </div>
-                  </Link>
-                ))}
+                      <div className="flex-1 min-w-0">
+                        <p className="mb-1 text-xs font-black tracking-widest text-[#693def]">Episode {ep.number}</p>
+                        <p className="text-[15px] font-bold text-white truncate group-hover:text-[#693def] transition-colors">
+                          {ep.title || `Episode ${ep.number}`}
+                        </p>
+                        <p className="text-xs text-[#777777] font-medium mt-1">
+                          {ep.duration ? `${Math.floor(ep.duration / 60)} min` : "?? min"}
+                        </p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+
+                <EpisodeScrollRail
+                  containerRef={episodeListRef}
+                  itemCount={episodeList?.length ?? 0}
+                  footerText={`${episodeList?.length ?? 0} eps`}
+                />
               </div>
             </div>
 

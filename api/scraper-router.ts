@@ -217,7 +217,7 @@ function toScoreValue(rating?: string) {
   if (!rating) return "0.00";
   const numeric = Number.parseFloat(rating.replace(",", ".").match(/\d+(\.\d+)?/)?.[0] ?? "");
   if (Number.isNaN(numeric)) return "0.00";
-  return numeric.toFixed(2);
+  return Math.min(10, Math.max(0, numeric)).toFixed(2);
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -287,27 +287,34 @@ async function persistAnimeRecord({
   const normalizedDuration = normalizeDuration(scrapedData.duration);
   const normalizedEpisodesCount = Math.min(scrapedEpisodesCount || scrapedData.episodesCount, 500);
   const normalizedStatus = inferAnimeStatus(scrapedData.status, normalizedEpisodesCount, existing?.status ?? undefined);
+  const clearStaleAnimeOnlyMetadata =
+    source === "stardima" &&
+    !scrapedData.externalId &&
+    !scrapedData.titleJp &&
+    !normalizeTitleSynonyms(scrapedData.titleSynonyms);
 
   const payload = {
     title: normalizedTitle,
     titleEnglish: normalizedTitleEnglish,
-    titleJp: scrapedData.titleJp ?? existing?.titleJp ?? undefined,
-    titleSynonyms: normalizedTitleSynonyms,
+    titleJp: scrapedData.titleJp ?? (clearStaleAnimeOnlyMetadata ? null : existing?.titleJp ?? undefined),
+    titleSynonyms: clearStaleAnimeOnlyMetadata ? null : normalizedTitleSynonyms,
     synopsis: normalizedSynopsis || existing?.synopsis || "",
     coverImage: choosePreferredImage(savedCoverImage, existing?.coverImage),
-    bannerImage: choosePreferredImage(savedBannerImage, existing?.bannerImage) ?? choosePreferredImage(savedCoverImage, existing?.coverImage),
+    bannerImage:
+      choosePreferredImage(savedBannerImage, clearStaleAnimeOnlyMetadata ? null : existing?.bannerImage) ??
+      choosePreferredImage(savedCoverImage, existing?.coverImage),
     status: normalizedStatus,
     type: scrapedData.type,
     episodesCount: normalizedEpisodesCount,
-    externalId: scrapedData.externalId ?? existing?.externalId ?? undefined,
+    externalId: scrapedData.externalId ?? (clearStaleAnimeOnlyMetadata ? null : existing?.externalId ?? undefined),
     externalSlug: normalizedSlug,
     sourceSite: source,
     lastScrapedAt: new Date(),
-    rating: normalizedRating ?? existing?.rating ?? undefined,
+    rating: normalizedRating ?? (clearStaleAnimeOnlyMetadata ? null : existing?.rating ?? undefined),
     releaseYear: normalizedReleaseYear ?? existing?.releaseYear ?? undefined,
-    studio: normalizedStudio ?? existing?.studio ?? undefined,
+    studio: normalizedStudio ?? (clearStaleAnimeOnlyMetadata ? null : existing?.studio ?? undefined),
     duration: normalizedDuration ?? existing?.duration ?? undefined,
-    score: normalizedRating ? toScoreValue(normalizedRating) : (existing?.score ?? "0.00"),
+    score: normalizedRating ? toScoreValue(normalizedRating) : (clearStaleAnimeOnlyMetadata ? "0.00" : (existing?.score ?? "0.00")),
     categoryId,
   } as const;
 
@@ -620,17 +627,18 @@ export const scraperRouter = createRouter({
         if (!scrapedData) {
           return { success: false, error: "Failed to scrape anime info" };
         }
+        const canonicalSlug = normalizeStoredSlug(scrapedData.slug || input.slug);
         const enrichedData = mergeScrapedAndEnrichedAnime(scrapedData, await enrichAnimeMetadata(scrapedData));
 
-        const scrapedEpisodes = input.importEpisodes ? await provider.scrapeAnimeEpisodes(input.slug) : [];
+        const scrapedEpisodes = input.importEpisodes ? await provider.scrapeAnimeEpisodes(canonicalSlug) : [];
         if (input.importEpisodes && scrapedEpisodes.length === 0) {
-          return { success: false, error: `No episodes were found on ${input.source} for "${input.slug}".` };
+          return { success: false, error: `No episodes were found on ${input.source} for "${canonicalSlug}".` };
         }
 
         const persisted = await persistAnimeRecord({
           db,
           source: input.source,
-          slug: input.slug,
+          slug: canonicalSlug,
           scrapedData: enrichedData,
           scrapedEpisodesCount: scrapedEpisodes.length,
         });

@@ -15,6 +15,20 @@
       "when": 1777930980451,
       "tag": "0001_new_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778205969509,
+      "tag": "0002_typical_valeria_richards",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778208334225,
+      "tag": "0003_tranquil_boomer",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 import puppeteer, { Browser, Page } from 'puppeteer';
 import type { WitanimeAnime, WitanimeEpisode, VideoSource } from './types';
+import { getPuppeteerLaunchOptions } from './puppeteer-launch';
 
 const BASE_URL = 'https://witanime.you';
 
@@ -7,20 +8,7 @@ let browser: Browser | null = null;
 
 async function getBrowser(): Promise<Browser> {
   if (!browser) {
-    const chromePath = 'C:\\Users\\Expert Gaming\\.cache\\puppeteer\\chrome\\win64-148.0.7778.97\\chrome-win64\\chrome.exe';
-    browser = await puppeteer.launch({
-      headless: true,
-      executablePath: chromePath,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--window-size=1920,1080',
-      ],
-    });
+    browser = await puppeteer.launch(getPuppeteerLaunchOptions());
   }
   return browser;
 }
@@ -28,6 +16,15 @@ async function getBrowser(): Promise<Browser> {
 async function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+const SERVER_LINK_SELECTORS = [
+  '#episode-servers .server-link',
+  '.servers .server-link',
+  '.server-list .server-link',
+  'a[data-url]',
+];
+
+const SERVER_LINK_SELECTOR = SERVER_LINK_SELECTORS.join(', ');
 
 const FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
@@ -177,6 +174,55 @@ async function safeNavigate(page: Page, url: string, retries = 3): Promise<boole
   return false;
 }
 
+async function waitForServerList(page: Page): Promise<boolean> {
+  for (const selector of SERVER_LINK_SELECTORS) {
+    try {
+      await page.waitForSelector(selector, { timeout: 4000 });
+      return true;
+    } catch {
+      // continue trying known layouts
+    }
+  }
+
+  return false;
+}
+
+async function readIframeSrc(page: Page): Promise<string> {
+  return page
+    .$eval('#iframe-container iframe', (iframe) => iframe.getAttribute('src') || '')
+    .catch(() => '');
+}
+
+async function waitForIframeChange(page: Page, previousSrc: string, timeout = 1600): Promise<string> {
+  try {
+    const handle = await page.waitForFunction(
+      (previous) => {
+        const browserGlobal = globalThis as {
+          document?: {
+            querySelector: (selector: string) => {
+              getAttribute: (name: string) => string | null;
+            } | null;
+          };
+        };
+        const iframe = browserGlobal.document?.querySelector('#iframe-container iframe');
+        if (!iframe) return false;
+
+        const nextSrc = iframe.getAttribute('src') || '';
+        if (!nextSrc) return false;
+
+        return nextSrc !== previous ? nextSrc : false;
+      },
+      { timeout },
+      previousSrc,
+    );
+
+    const nextSrc = await handle.jsonValue();
+    return typeof nextSrc === 'string' ? nextSrc : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function scrapeAnimeEpisodes(animeSlug: string): Promise<WitanimeEpisode[]> {
   const b = await getBrowser();
   const page = await b.newPage();
@@ -295,9 +341,13 @@ export async function scrapeEpisodeSources(episodeId: string): Promise<VideoSour
       return sources;
     }
 
-    await page.waitForSelector('#episode-servers .server-link', { timeout: 10000 });
+    const hasServerList = await waitForServerList(page);
+    if (!hasServerList) {
+      console.error(`No recognizable server list found for episode ${episodeId}`);
+      return sources;
+    }
 
-    const directSources = await page.$$eval('#episode-servers .server-link', (elements) =>
+    const directSources = await page.$$eval(SERVER_LINK_SELECTOR, (elements) =>
       elements.map((el) => {
         const label =
           (el.querySelector('.ser')?.textContent || el.textContent || '')
@@ -314,14 +364,24 @@ export async function scrapeEpisodeSources(episodeId: string): Promise<VideoSour
       }),
     ).catch(() => []);
 
+    const seen = new Set<string>();
+
     for (const item of directSources) {
       const decodedUrl = normalizeAbsoluteUrl(decodeBase64Url(item.link) || item.link);
       if (!decodedUrl) continue;
+      const key = `${item.label}|${decodedUrl}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
 
       if (decodedUrl.includes('yonaplay.')) {
         const nestedSources = await resolveYonaPlaySources(decodedUrl);
         if (nestedSources.length > 0) {
-          sources.push(...nestedSources);
+          for (const nestedSource of nestedSources) {
+            const nestedKey = `${nestedSource.server}|${nestedSource.quality}|${nestedSource.url}`;
+            if (seen.has(nestedKey)) continue;
+            seen.add(nestedKey);
+            sources.push(nestedSource);
+          }
           continue;
         }
       }
@@ -334,29 +394,37 @@ export async function scrapeEpisodeSources(episodeId: string): Promise<VideoSour
     }
 
     if (sources.length === 0) {
-      const serverItems = await page.$$('#episode-servers .server-link');
+      const serverItems = await page.$$(SERVER_LINK_SELECTOR);
+      let previousIframeSrc = await readIframeSrc(page);
 
       for (let i = 0; i < serverItems.length; i++) {
         const serverName = await serverItems[i]
-          .$eval('.ser', (el) => el.textContent?.trim().toLowerCase() || '')
+          .$eval('.ser, .notice, span', (el) => el.textContent?.trim().toLowerCase() || '')
           .catch(async () => {
             return serverItems[i].evaluate((el) => el.textContent?.trim().toLowerCase() || '');
           });
 
         await serverItems[i].click().catch(() => undefined);
-        await delay(2500);
+        const changedIframeSrc = await waitForIframeChange(page, previousIframeSrc);
 
-        const embedUrl = await page
-          .$eval('#iframe-container iframe', (iframe) => iframe.getAttribute('src') || '')
-          .catch(() => '');
+        const embedUrl = changedIframeSrc || await readIframeSrc(page);
+        previousIframeSrc = embedUrl || previousIframeSrc;
 
         const normalizedUrl = normalizeAbsoluteUrl(embedUrl);
         if (!normalizedUrl) continue;
+        const key = `${serverName}|${normalizedUrl}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
 
         if (normalizedUrl.includes('yonaplay.')) {
           const nestedSources = await resolveYonaPlaySources(normalizedUrl);
           if (nestedSources.length > 0) {
-            sources.push(...nestedSources);
+            for (const nestedSource of nestedSources) {
+              const nestedKey = `${nestedSource.server}|${nestedSource.quality}|${nestedSource.url}`;
+              if (seen.has(nestedKey)) continue;
+              seen.add(nestedKey);
+              sources.push(nestedSource);
+            }
             continue;
           }
         }
@@ -370,13 +438,18 @@ export async function scrapeEpisodeSources(episodeId: string): Promise<VideoSour
     }
 
     if (sources.length === 0) {
-      const links = await page.$$eval('a[href*="stream"], a[href*="play"], a[href*="embed"]', (elements) =>
-        elements.map((el) => el.getAttribute('href') || '').filter((href) => href && !href.includes('javascript')),
+      const links = await page.$$eval('a[href*="stream"], a[href*="play"], a[href*="embed"], a[data-url]', (elements) =>
+        elements
+          .map((el) => el.getAttribute('href') || el.getAttribute('data-url') || '')
+          .filter((href) => href && !href.includes('javascript')),
       );
 
       for (const link of links.slice(0, 10)) {
-        const url = normalizeAbsoluteUrl(link);
+        const url = normalizeAbsoluteUrl(decodeBase64Url(link) || link);
         if (!url) continue;
+        const key = `fallback|${url}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
 
         sources.push({ server: inferServer('', url), quality: 'hd', url });
       }

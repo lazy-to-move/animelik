@@ -37,6 +37,25 @@ export const reviewRouter = createRouter({
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
       const userId = ctx.user.id;
+      const existing = await db
+        .select()
+        .from(reviews)
+        .where(and(eq(reviews.userId, userId), eq(reviews.animeId, input.animeId)))
+        .limit(1);
+
+      if (existing[0]) {
+        await db
+          .update(reviews)
+          .set({
+            rating: input.rating,
+            comment: input.comment,
+          })
+          .where(eq(reviews.id, existing[0].id));
+
+        const refreshed = await db.select().from(reviews).where(eq(reviews.id, existing[0].id)).limit(1);
+        return refreshed[0];
+      }
+
       const [inserted] = await db.insert(reviews).values({
         userId,
         animeId: input.animeId,

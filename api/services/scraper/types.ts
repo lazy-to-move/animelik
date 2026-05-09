@@ -4,6 +4,7 @@ export const SOURCE_SITE_IDS = [
   "anime4up",
   "animelek",
   "ristoanime",
+  "stardima",
 ] as const;
 
 export type SourceSiteId = (typeof SOURCE_SITE_IDS)[number];

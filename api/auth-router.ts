@@ -3,7 +3,7 @@ import * as cookie from "cookie";
 import { z } from "zod";
 import { Session } from "@contracts/constants";
 import { getSessionCookieOptions } from "./lib/cookies";
-import { createRouter, authedQuery, publicQuery } from "./middleware";
+import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { users } from "@db/schema";
 import { eq } from "drizzle-orm";
@@ -12,6 +12,7 @@ import { signSessionToken } from "./kimi/session";
 import { findUserByEmail, findUserByGoogleId } from "./queries/users";
 import { hashPassword, normalizeEmail, verifyPassword } from "./lib/passwords";
 import { verifyGoogleCredential } from "./google-auth";
+import { enforceRateLimit, getRequestClientKey } from "./lib/rate-limit";
 
 const authCredentialsSchema = z.object({
   email: z.string().email().max(320),
@@ -65,8 +66,11 @@ export const authRouter = createRouter({
   signUp: publicQuery.input(signUpSchema).mutation(async ({ ctx, input }) => {
     try {
       const db = getDb();
-
       const email = normalizeEmail(input.email);
+      const clientKey = getRequestClientKey(ctx.req);
+      enforceRateLimit(`auth:signup:ip:${clientKey}`, 8, 10 * 60 * 1000);
+      enforceRateLimit(`auth:signup:email:${clientKey}:${email}`, 4, 10 * 60 * 1000);
+
       const existingUser = await findUserByEmail(email);
       if (existingUser) {
         throw new Error("An account with this email already exists.");
@@ -97,6 +101,10 @@ export const authRouter = createRouter({
   signIn: publicQuery.input(authCredentialsSchema).mutation(async ({ ctx, input }) => {
     try {
       const email = normalizeEmail(input.email);
+      const clientKey = getRequestClientKey(ctx.req);
+      enforceRateLimit(`auth:signin:ip:${clientKey}`, 20, 10 * 60 * 1000);
+      enforceRateLimit(`auth:signin:email:${clientKey}:${email}`, 10, 10 * 60 * 1000);
+
       const user = await findUserByEmail(email);
       if (!user?.passwordHash) {
         throw new Error("Invalid email or password.");
@@ -121,6 +129,8 @@ export const authRouter = createRouter({
 
   googleSignIn: publicQuery.input(googleSignInSchema).mutation(async ({ ctx, input }) => {
     try {
+      const clientKey = getRequestClientKey(ctx.req);
+      enforceRateLimit(`auth:google:ip:${clientKey}`, 15, 10 * 60 * 1000);
       const googleUser = await verifyGoogleCredential(input.credential);
       const db = getDb();
       const email = normalizeEmail(googleUser.email);
@@ -169,7 +179,7 @@ export const authRouter = createRouter({
     }
   }),
 
-  me: authedQuery.query((opts) => opts.ctx.user),
+  me: publicQuery.query(({ ctx }) => ctx.user ?? null),
   logout: publicQuery.mutation(async ({ ctx }) => {
     clearSessionCookie(ctx.resHeaders, ctx.req.headers);
     return { success: true };

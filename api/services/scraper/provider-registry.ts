@@ -1,4 +1,5 @@
 import type { ScraperAnime, ScraperEpisode, SourceSiteId, VideoSource } from "./types";
+import * as stardima from "./stardima-scraper";
 import * as witanime from "./witanime-scraper";
 import {
   type GenericSiteConfig,
@@ -22,7 +23,7 @@ export interface ScraperProvider {
   scrapeEpisodeSources(episodeId: string): Promise<VideoSource[]>;
 }
 
-const genericConfigs: Record<Exclude<SourceSiteId, "witanime">, GenericSiteConfig> = {
+const genericConfigs: Record<Exclude<SourceSiteId, "witanime" | "stardima">, GenericSiteConfig> = {
   okanime: {
     id: "okanime",
     name: "OkAnime",
@@ -101,12 +102,26 @@ const witanimeProvider: ScraperProvider = {
   scrapeEpisodeSources: (episodeId) => witanime.scrapeEpisodeSources(episodeId),
 };
 
+const stardimaProvider: ScraperProvider = {
+  id: "stardima",
+  name: "StarDima",
+  baseUrl: "https://watch.stardima.com",
+  latestUrl: "https://watch.stardima.com/watch/tvshows/",
+  animePathHint: "https://watch.stardima.com/watch/tvshows/",
+  searchAnime: (query) => stardima.searchAnime(query),
+  scrapeLatestAnime: (limit = 20) => stardima.scrapeLatestAnime(limit),
+  scrapeAnimeInfo: (slug) => stardima.scrapeAnimeInfo(slug),
+  scrapeAnimeEpisodes: (slug) => stardima.scrapeAnimeEpisodes(slug),
+  scrapeEpisodeSources: (episodeId) => stardima.scrapeEpisodeSources(episodeId),
+};
+
 export const scraperProviders: Record<SourceSiteId, ScraperProvider> = {
   witanime: witanimeProvider,
   okanime: buildGenericProvider(genericConfigs.okanime),
   anime4up: buildGenericProvider(genericConfigs.anime4up),
   animelek: buildGenericProvider(genericConfigs.animelek),
   ristoanime: buildGenericProvider(genericConfigs.ristoanime),
+  stardima: stardimaProvider,
 };
 
 export function getScraperProvider(source: SourceSiteId): ScraperProvider {

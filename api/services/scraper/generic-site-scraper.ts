@@ -1,6 +1,7 @@
 /* eslint-disable no-irregular-whitespace */
 import puppeteer, { Browser, Page } from "puppeteer";
 import type { ScraperAnime, ScraperEpisode, SourceSiteId, VideoSource } from "./types";
+import { getPuppeteerLaunchOptions } from "./puppeteer-launch";
 
 export interface GenericSiteConfig {
   id: SourceSiteId;
@@ -29,20 +30,7 @@ async function getBrowser(cacheKey: string): Promise<Browser> {
   const existing = browserCache.get(cacheKey);
   if (existing) return existing;
 
-  const chromePath = "C:\\Users\\Expert Gaming\\.cache\\puppeteer\\chrome\\win64-148.0.7778.97\\chrome-win64\\chrome.exe";
-  const browser = await puppeteer.launch({
-    headless: true,
-    executablePath: chromePath,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-blink-features=AutomationControlled",
-      "--disable-web-security",
-      "--disable-features=IsolateOrigins,site-per-process",
-      "--window-size=1920,1080",
-    ],
-  });
+  const browser = await puppeteer.launch(getPuppeteerLaunchOptions());
 
   browserCache.set(cacheKey, browser);
   return browser;
@@ -151,6 +139,11 @@ function normalizeEpisodeCardTitle(title: string): string {
   return cleaned;
 }
 
+function isWeakEpisodeTitle(title: string): boolean {
+  const normalized = cleanupTitle(title).replace(/\s+/g, " ").trim().toLowerCase();
+  return !normalized || normalized === "tv" || normalized.includes("مشاهدة وتحميل");
+}
+
 function pickBestTitle(...candidates: Array<string | undefined>): string {
   const normalized = candidates
     .map((value) => normalizeTitleCandidate(value ?? ""))
@@ -240,6 +233,8 @@ function extractEpisodeIdFromUrl(url: string, pathSegment: string): string | nul
   return id.replace(/\/$/, "") || null;
 }
 
+// Legacy helper kept temporarily while the robust parser is the active path.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function extractEpisodeNumber(text: string, href?: string): number | null {
   const explicitMatch =
     text.match(/(?:episode|ep|الحلقة)\s*[-:]?\s*(\d{1,4})/i) ||
@@ -264,7 +259,57 @@ function extractEpisodeNumber(text: string, href?: string): number | null {
   return null;
 }
 
+// Legacy helper kept temporarily while the robust parser is the active path.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function looksLikeEpisodeLink(text: string, href: string, episodePathSegment: string): boolean {
+  if (!href) return false;
+  const loweredText = text.toLowerCase();
+  const loweredHref = href.toLowerCase();
+  const loweredSegment = episodePathSegment.toLowerCase();
+
+  return (
+    loweredHref.includes(loweredSegment) ||
+    loweredText.includes("الحلقة") ||
+    loweredText.includes("episode") ||
+    loweredText.includes("ep ")
+  );
+}
+
+function safeDecodeEpisodeHref(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function extractEpisodeNumberRobust(text: string, href?: string): number | null {
+  const decodedHref = href ? safeDecodeEpisodeHref(href) : "";
+  const explicitMatch =
+    text.match(/(?:episode|ep|الحلقة)\s*[-:]?\s*(\d{1,4})/i) ||
+    text.match(/(\d{1,4})\s*الحلقة/i) ||
+    text.match(/(?:^|\s)(\d{1,4})(?:\s|$)/);
+
+  if (explicitMatch) {
+    const number = Number(explicitMatch[1]);
+    if (Number.isFinite(number) && number > 0 && number <= 500) return number;
+  }
+
+  if (decodedHref) {
+    const hrefMatch =
+      decodedHref.match(/\/episode\/(\d{1,4})(?:\/|$)/i) ||
+      decodedHref.match(/(?:episode|ep|الحلقة)(?:[\s:_-]+)(\d{1,4})(?:[-/]|$)/i);
+
+    if (hrefMatch) {
+      const number = Number(hrefMatch[1]);
+      if (Number.isFinite(number) && number > 0 && number <= 500) return number;
+    }
+  }
+
+  return null;
+}
+
+function looksLikeEpisodeLinkRobust(text: string, href: string, episodePathSegment: string): boolean {
   if (!href) return false;
   const loweredText = text.toLowerCase();
   const loweredHref = href.toLowerCase();
@@ -285,12 +330,17 @@ function deriveEpisodeId(absoluteHref: string, episodePathSegment: string): stri
 function looksLikeAnimeEpisodeUrl(config: GenericSiteConfig, animeSlug: string, absoluteHref: string): boolean {
   const normalizedHref = absoluteHref.toLowerCase();
   const normalizedSlug = animeSlug.toLowerCase();
+  const normalizedSlugCore = config.id === 'anime4up'
+    ? normalizedSlug.replace(/-[a-z0-9]{4,8}$/i, '')
+    : normalizedSlug;
   const episodeTail = normalizedHref.split('/episode/')[1] ?? "";
 
   if (!normalizedHref.includes('/episode/')) return false;
-  if (!normalizedHref.includes(normalizedSlug)) return false;
+  if (!normalizedHref.includes(normalizedSlug) && !normalizedHref.includes(normalizedSlugCore)) return false;
   if (normalizedHref.includes(`${normalizedSlug}-episode-`)) return true;
+  if (normalizedHref.includes(`${normalizedSlugCore}-episode-`)) return true;
   if (episodeTail.startsWith(`${normalizedSlug}-`) && /\d{1,4}/.test(episodeTail)) return true;
+  if (episodeTail.startsWith(`${normalizedSlugCore}-`) && /\d{1,4}/.test(episodeTail)) return true;
 
   if (config.id === 'anime4up') {
     return true;
@@ -418,6 +468,51 @@ async function extractStructuredAnimeData(page: Page, baseUrl: string): Promise<
   return {};
 }
 
+interface ScrapedEpisodeAnchor {
+  index: number;
+  title: string;
+  imageText: string;
+  thumbnail: string;
+  onclick: string;
+  href: string;
+}
+
+async function extractEpisodeAnchorsFromPage(page: Page): Promise<ScrapedEpisodeAnchor[]> {
+  return page.$$eval("a", (anchors) =>
+    anchors.map((anchor, index) => {
+      const parentImage =
+        anchor.querySelector("img") ||
+        anchor.closest("li, article, .episodes-card-container, [class*='episode']")?.querySelector("img");
+
+      return {
+        index,
+        title: anchor.textContent?.trim() ?? "",
+        imageText: parentImage?.getAttribute("alt")?.trim() ?? "",
+        thumbnail: parentImage?.getAttribute("src") ?? parentImage?.getAttribute("data-src") ?? "",
+        onclick: anchor.getAttribute("onclick") ?? "",
+        href: anchor.getAttribute("href") ?? "",
+      };
+    }),
+  ).catch(() => []);
+}
+
+async function extractAnimePaginationUrls(page: Page, config: GenericSiteConfig, animeSlug: string): Promise<string[]> {
+  const animePathSegment = config.animePathSegment ?? "/anime/";
+  const expectedPrefix = `${config.baseUrl}${animePathSegment}${animeSlug}/page/`.toLowerCase();
+
+  const rawLinks = await page.$$eval("a[href]", (anchors) =>
+    anchors.map((anchor) => anchor.getAttribute("href") || "").filter(Boolean),
+  ).catch(() => []);
+
+  const urls = rawLinks
+    .map((href) => normalizeAbsoluteUrl(config.baseUrl, href))
+    .filter((href): href is string => Boolean(href))
+    .filter((href) => href.toLowerCase().startsWith(expectedPrefix))
+    .filter((href) => /\/page\/\d+\/?$/i.test(href));
+
+  return Array.from(new Set(urls));
+}
+
 export async function scrapeAnimeEpisodesWithConfig(config: GenericSiteConfig, animeSlug: string): Promise<ScraperEpisode[]> {
   const browser = await getBrowser(config.id);
   const page = await browser.newPage();
@@ -428,24 +523,36 @@ export async function scrapeAnimeEpisodesWithConfig(config: GenericSiteConfig, a
     const url = `${config.baseUrl}${animePathSegment}${animeSlug}`;
     if (!await safeNavigate(page, url)) return [];
 
-    await page.waitForSelector("a, .episodes-card-container, [class*='episode'], article, .listing li", { timeout: 10000 });
+    const scrapedEpisodes: ScrapedEpisodeAnchor[] = [];
+    const pagesToVisit = [url];
+    const visitedPages = new Set<string>();
 
-    const scrapedEpisodes = await page.$$eval("a", (anchors) =>
-      anchors.map((anchor, index) => {
-        const parentImage =
-          anchor.querySelector("img") ||
-          anchor.closest("li, article, .episodes-card-container, [class*='episode']")?.querySelector("img");
+    while (pagesToVisit.length > 0 && visitedPages.size < 50) {
+      const pageUrl = pagesToVisit.shift();
+      if (!pageUrl || visitedPages.has(pageUrl)) continue;
+      visitedPages.add(pageUrl);
 
-        return {
-          index,
-          title: anchor.textContent?.trim() ?? "",
-          imageText: parentImage?.getAttribute("alt")?.trim() ?? "",
-          thumbnail: parentImage?.getAttribute("src") ?? parentImage?.getAttribute("data-src") ?? "",
-          onclick: anchor.getAttribute("onclick") ?? "",
-          href: anchor.getAttribute("href") ?? "",
-        };
-      }),
-    ).catch(() => []);
+      const currentPage = pageUrl === url ? page : await browser.newPage();
+      try {
+        if (pageUrl !== url && !await safeNavigate(currentPage, pageUrl)) {
+          continue;
+        }
+
+        await currentPage.waitForSelector("a, .episodes-card-container, [class*='episode'], article, .listing li", { timeout: 10000 });
+        scrapedEpisodes.push(...await extractEpisodeAnchorsFromPage(currentPage));
+
+        const paginatedUrls = await extractAnimePaginationUrls(currentPage, config, animeSlug);
+        for (const nextUrl of paginatedUrls) {
+          if (!visitedPages.has(nextUrl) && !pagesToVisit.includes(nextUrl)) {
+            pagesToVisit.push(nextUrl);
+          }
+        }
+      } finally {
+        if (currentPage !== page) {
+          await currentPage.close();
+        }
+      }
+    }
 
     const episodes: ScraperEpisode[] = [];
     for (const episode of scrapedEpisodes) {
@@ -454,17 +561,20 @@ export async function scrapeAnimeEpisodesWithConfig(config: GenericSiteConfig, a
       const absoluteHref = normalizeAbsoluteUrl(config.baseUrl, decodedHref || episode.href);
       if (!absoluteHref) continue;
       if (!looksLikeAnimeEpisodeUrl(config, animeSlug, absoluteHref)) continue;
-      if (!looksLikeEpisodeLink(`${episode.title} ${episode.imageText}`, absoluteHref, episodePathSegment)) continue;
+      if (!looksLikeEpisodeLinkRobust(`${episode.title} ${episode.imageText}`, absoluteHref, episodePathSegment)) continue;
 
       const id = deriveEpisodeId(absoluteHref, episodePathSegment);
-      const number = extractEpisodeNumber(`${episode.title} ${episode.imageText}`, absoluteHref);
+      const number = extractEpisodeNumberRobust(`${episode.title} ${episode.imageText}`, absoluteHref);
       if (!number) continue;
 
       const preferredTitle = normalizeEpisodeCardTitle(episode.title);
+      const alternateTitle = normalizeEpisodeCardTitle(episode.imageText);
       episodes.push({
         id,
         number,
-        title: preferredTitle || normalizeEpisodeCardTitle(episode.imageText) || `Episode ${number}`,
+        title: !isWeakEpisodeTitle(preferredTitle)
+          ? preferredTitle
+          : alternateTitle || `Episode ${number}`,
         thumbnail: normalizeAbsoluteUrl(config.baseUrl, episode.thumbnail),
         sources: [],
       });

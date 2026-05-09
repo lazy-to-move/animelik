@@ -172,8 +172,10 @@ function HeroSection() {
               {heroAnime?.title ?? "The Next Evolution"}
             </h1>
 
-            {heroAnime?.titleJp && (
-              <p className="text-xl text-[#8257f2] font-semibold mb-6 tracking-wide">{heroAnime.titleJp}</p>
+            {((heroAnime?.titleEnglish && heroAnime.titleEnglish !== heroAnime.title) || (heroAnime?.titleJp && heroAnime.titleJp !== heroAnime.title)) && (
+              <p className="text-xl text-[#8257f2] font-semibold mb-6 tracking-wide">
+                {heroAnime?.titleEnglish && heroAnime.titleEnglish !== heroAnime.title ? heroAnime.titleEnglish : heroAnime?.titleJp}
+              </p>
             )}
 
             <MixedSynopsisText className="mb-10 max-w-xl text-lg font-medium leading-relaxed text-[#bbbbbb] sm:text-xl">

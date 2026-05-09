@@ -1,0 +1,16 @@
+{
+  "name": "Synx Anime",
+  "short_name": "Synx",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#030209",
+  "theme_color": "#030209",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

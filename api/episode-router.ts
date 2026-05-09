@@ -1,8 +1,15 @@
 import { z } from "zod";
-import { eq, asc, inArray } from "drizzle-orm";
-import { createRouter, publicQuery, adminQuery } from "./middleware";
+import { TRPCError } from "@trpc/server";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { createRouter, publicQuery, adminQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { episodes } from "@db/schema";
+import { episodeBrokenReports, episodes } from "@db/schema";
+
+const BROKEN_REPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+function getBrokenReportWindowStart(now = new Date()) {
+  return new Date(now.getTime() - BROKEN_REPORT_COOLDOWN_MS);
+}
 
 export const episodeRouter = createRouter({
   list: publicQuery
@@ -40,6 +47,130 @@ export const episodeRouter = createRouter({
         )
         .limit(100);
       return results.find(e => e.number === input.number) ?? null;
+    }),
+
+  brokenReportStatus: authedQuery
+    .input(z.object({ episodeId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const db = getDb();
+      const windowStart = getBrokenReportWindowStart();
+      const [latestReport] = await db
+        .select({
+          createdAt: episodeBrokenReports.createdAt,
+        })
+        .from(episodeBrokenReports)
+        .where(
+          and(
+            eq(episodeBrokenReports.userId, ctx.user.id),
+            eq(episodeBrokenReports.episodeId, input.episodeId),
+            gte(episodeBrokenReports.createdAt, windowStart),
+          ),
+        )
+        .orderBy(desc(episodeBrokenReports.createdAt))
+        .limit(1);
+
+      const [totals] = await db
+        .select({
+          totalReports: sql<number>`cast(count(${episodeBrokenReports.id}) as int)`,
+          reportsLast24h: sql<number>`
+            cast(
+              coalesce(
+                sum(case when ${episodeBrokenReports.createdAt} >= ${windowStart} then 1 else 0 end),
+                0
+              ) as int
+            )
+          `,
+        })
+        .from(episodeBrokenReports)
+        .where(eq(episodeBrokenReports.episodeId, input.episodeId));
+
+      const nextReportAt = latestReport?.createdAt
+        ? new Date(latestReport.createdAt.getTime() + BROKEN_REPORT_COOLDOWN_MS)
+        : null;
+
+      return {
+        canReport: !latestReport,
+        lastReportedAt: latestReport?.createdAt ?? null,
+        nextReportAt,
+        totalReports: totals?.totalReports ?? 0,
+        reportsLast24h: totals?.reportsLast24h ?? 0,
+      };
+    }),
+
+  reportBroken: authedQuery
+    .input(z.object({ episodeId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+      const [episode] = await db
+        .select({
+          id: episodes.id,
+          animeId: episodes.animeId,
+          number: episodes.number,
+          title: episodes.title,
+        })
+        .from(episodes)
+        .where(eq(episodes.id, input.episodeId))
+        .limit(1);
+
+      if (!episode) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Episode not found.",
+        });
+      }
+
+      const windowStart = getBrokenReportWindowStart();
+      const [existingReport] = await db
+        .select({
+          id: episodeBrokenReports.id,
+          createdAt: episodeBrokenReports.createdAt,
+        })
+        .from(episodeBrokenReports)
+        .where(
+          and(
+            eq(episodeBrokenReports.userId, ctx.user.id),
+            eq(episodeBrokenReports.episodeId, input.episodeId),
+            gte(episodeBrokenReports.createdAt, windowStart),
+          ),
+        )
+        .orderBy(desc(episodeBrokenReports.createdAt))
+        .limit(1);
+
+      if (existingReport) {
+        const nextReportAt = new Date(existingReport.createdAt.getTime() + BROKEN_REPORT_COOLDOWN_MS);
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: `You already reported this episode in the last 24 hours. You can report again after ${nextReportAt.toLocaleString()}.`,
+        });
+      }
+
+      await db.insert(episodeBrokenReports).values({
+        userId: ctx.user.id,
+        animeId: episode.animeId,
+        episodeId: episode.id,
+      });
+
+      const [totals] = await db
+        .select({
+          totalReports: sql<number>`cast(count(${episodeBrokenReports.id}) as int)`,
+          reportsLast24h: sql<number>`
+            cast(
+              coalesce(
+                sum(case when ${episodeBrokenReports.createdAt} >= ${windowStart} then 1 else 0 end),
+                0
+              ) as int
+            )
+          `,
+        })
+        .from(episodeBrokenReports)
+        .where(eq(episodeBrokenReports.episodeId, input.episodeId));
+
+      return {
+        success: true,
+        message: `Episode ${episode.number} has been reported for review.`,
+        totalReports: totals?.totalReports ?? 1,
+        reportsLast24h: totals?.reportsLast24h ?? 1,
+      };
     }),
 
   create: adminQuery

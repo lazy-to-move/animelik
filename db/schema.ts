@@ -10,6 +10,8 @@ import {
   boolean,
   date,
   jsonb,
+  index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type { SourceSiteId } from "../api/services/scraper/types";
 
@@ -29,7 +31,7 @@ export const users = pgTable("users", {
   unionId: varchar("unionId", { length: 255 }).notNull().unique(),
   googleId: varchar("googleId", { length: 255 }).unique(),
   name: varchar("name", { length: 255 }),
-  email: varchar("email", { length: 320 }),
+  email: varchar("email", { length: 320 }).unique(),
   passwordHash: varchar("passwordHash", { length: 255 }),
   avatar: text("avatar"),
   role: userRoleEnum("role").default("user").notNull(),
@@ -70,7 +72,7 @@ export const anime = pgTable("anime", {
   rating: varchar("rating", { length: 10 }),
   releaseYear: integer("releaseYear"),
   studio: varchar("studio", { length: 100 }),
-  score: numeric("score", { precision: 3, scale: 2 }).default("0.00"),
+  score: numeric("score", { precision: 4, scale: 2 }).default("0.00"),
   episodesCount: integer("episodesCount").default(0),
   duration: integer("duration"),
   featured: boolean("featured").default(false),
@@ -118,26 +120,57 @@ export const episodes = pgTable("episodes", {
 export type Episode = typeof episodes.$inferSelect;
 export type InsertEpisode = typeof episodes.$inferInsert;
 
-export const watchlist = pgTable("watchlist", {
-  id: serial("id").primaryKey(),
-  userId: integer("userId").notNull().references(() => users.id),
-  animeId: integer("animeId").notNull().references(() => anime.id),
-  status: watchlistStatusEnum("status").default("watching"),
-  currentEpisode: integer("currentEpisode").default(0),
-  createdAt: timestamp("createdAt", { mode: "date" }).defaultNow().notNull(),
-});
+export const watchlist = pgTable(
+  "watchlist",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("userId").notNull().references(() => users.id),
+    animeId: integer("animeId").notNull().references(() => anime.id),
+    status: watchlistStatusEnum("status").default("watching"),
+    currentEpisode: integer("currentEpisode").default(0),
+    createdAt: timestamp("createdAt", { mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userAnimeUnique: uniqueIndex("watchlist_user_anime_unique").on(table.userId, table.animeId),
+  }),
+);
 
 export type WatchlistItem = typeof watchlist.$inferSelect;
 export type InsertWatchlistItem = typeof watchlist.$inferInsert;
 
-export const reviews = pgTable("reviews", {
-  id: serial("id").primaryKey(),
-  userId: integer("userId").notNull().references(() => users.id),
-  animeId: integer("animeId").notNull().references(() => anime.id),
-  rating: integer("rating").notNull(),
-  comment: text("comment"),
-  createdAt: timestamp("createdAt", { mode: "date" }).defaultNow().notNull(),
-});
+export const reviews = pgTable(
+  "reviews",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("userId").notNull().references(() => users.id),
+    animeId: integer("animeId").notNull().references(() => anime.id),
+    rating: integer("rating").notNull(),
+    comment: text("comment"),
+    createdAt: timestamp("createdAt", { mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userAnimeUnique: uniqueIndex("reviews_user_anime_unique").on(table.userId, table.animeId),
+  }),
+);
 
 export type Review = typeof reviews.$inferSelect;
 export type InsertReview = typeof reviews.$inferInsert;
+
+export const episodeBrokenReports = pgTable(
+  "episodeBrokenReports",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("userId").notNull().references(() => users.id),
+    animeId: integer("animeId").notNull().references(() => anime.id),
+    episodeId: integer("episodeId").notNull().references(() => episodes.id),
+    createdAt: timestamp("createdAt", { mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userCreatedIdx: index("episode_broken_reports_user_created_idx").on(table.userId, table.createdAt),
+    episodeCreatedIdx: index("episode_broken_reports_episode_created_idx").on(table.episodeId, table.createdAt),
+    animeCreatedIdx: index("episode_broken_reports_anime_created_idx").on(table.animeId, table.createdAt),
+  }),
+);
+
+export type EpisodeBrokenReport = typeof episodeBrokenReports.$inferSelect;
+export type InsertEpisodeBrokenReport = typeof episodeBrokenReports.$inferInsert;

@@ -6,9 +6,28 @@ import path from "path";
 
 type App = Hono<{ Bindings: HttpBindings }>;
 
+function isKnownFrontendRoute(pathname: string): boolean {
+  return [
+    /^\/$/,
+    /^\/browse$/,
+    /^\/schedule$/,
+    /^\/login$/,
+    /^\/signup$/,
+    /^\/watchlist$/,
+    /^\/admin$/,
+    /^\/anime\/[^/]+\/?$/,
+    /^\/watch\/[^/]+\/\d+\/?$/,
+  ].some((pattern) => pattern.test(pathname));
+}
+
 export function serveStaticFiles(app: App) {
   const distPath = path.resolve(import.meta.dirname, "../dist/public");
 
+  // Imported covers are downloaded at runtime into ./public/anime-covers.
+  app.use("/anime-covers/*", serveStatic({
+    root: "./public/anime-covers",
+    rewriteRequestPath: (requestPath) => requestPath.replace(/^\/anime-covers\/+/i, ""),
+  }));
   app.use("*", serveStatic({ root: "./dist/public" }));
 
   app.notFound((c) => {
@@ -18,6 +37,7 @@ export function serveStaticFiles(app: App) {
     }
     const indexPath = path.resolve(distPath, "index.html");
     const content = fs.readFileSync(indexPath, "utf-8");
-    return c.html(content);
+    const pathname = new URL(c.req.url).pathname;
+    return c.html(content, isKnownFrontendRoute(pathname) ? 200 : 404);
   });
 }

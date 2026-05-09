@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { Routes, Route, useLocation } from "react-router";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
@@ -21,12 +21,92 @@ function RouteFallback() {
   );
 }
 
+function setMetaTag(selector: string, attribute: "name" | "property", value: string, content: string) {
+  let tag = document.head.querySelector<HTMLMetaElement>(selector);
+  if (!tag) {
+    tag = document.createElement("meta");
+    tag.setAttribute(attribute, value);
+    document.head.appendChild(tag);
+  }
+  tag.setAttribute("content", content);
+}
+
+function setCanonical(url: string) {
+  let link = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+  if (!link) {
+    link = document.createElement("link");
+    link.setAttribute("rel", "canonical");
+    document.head.appendChild(link);
+  }
+  link.setAttribute("href", url);
+}
+
+function RouteMetadata() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const path = location.pathname;
+    let title = "Synx Anime";
+    let description =
+      "Synx Anime is an anime streaming and discovery experience for browsing series, tracking schedules, saving watchlists, and syncing episodes from supported sources.";
+    let robots = "index,follow";
+
+    if (path === "/") {
+      title = "Synx Anime | Stream and Discover Anime";
+      description = "Discover featured anime, trending series, fresh releases, and community picks on Synx Anime.";
+    } else if (path.startsWith("/browse")) {
+      title = "Browse Anime | Synx Anime";
+      description = "Search and filter anime by status, genre, type, and release year inside the Synx Anime library.";
+    } else if (path.startsWith("/schedule")) {
+      title = "Weekly Anime Schedule | Synx Anime";
+      description = "Track ongoing anime by release day with the Synx weekly schedule and broadcast calendar.";
+    } else if (path.startsWith("/anime/")) {
+      title = "Anime Details | Synx Anime";
+      description = "Read anime details, browse episodes, and manage your watchlist on Synx Anime.";
+    } else if (path.startsWith("/watch/")) {
+      title = "Watch Anime Episode | Synx Anime";
+      description = "Stream anime episodes from your Synx library with selectable sources and quality options.";
+      robots = "noindex,nofollow";
+    } else if (path === "/watchlist") {
+      title = "Your Watchlist | Synx Anime";
+      description = "Manage saved anime, progress tracking, and watch status in your personal Synx watchlist.";
+      robots = "noindex,nofollow";
+    } else if (path === "/login" || path === "/signup") {
+      title = path === "/signup" ? "Create Account | Synx Anime" : "Sign In | Synx Anime";
+      description = "Sign in to Synx Anime or create an account to manage watchlists, reviews, and viewing progress.";
+      robots = "noindex,nofollow";
+    } else if (path === "/admin") {
+      title = "Admin Dashboard | Synx Anime";
+      description = "Manage anime, episodes, categories, schedules, and source imports in the Synx admin dashboard.";
+      robots = "noindex,nofollow";
+    } else {
+      title = "Page Not Found | Synx Anime";
+      description = "The page you requested could not be found on Synx Anime.";
+      robots = "noindex,nofollow";
+    }
+
+    const canonicalUrl = `${window.location.origin}${path}${location.search}`;
+    document.title = title;
+    setMetaTag('meta[name="description"]', "name", "description", description);
+    setMetaTag('meta[property="og:title"]', "property", "og:title", title);
+    setMetaTag('meta[property="og:description"]', "property", "og:description", description);
+    setMetaTag('meta[property="og:url"]', "property", "og:url", canonicalUrl);
+    setMetaTag('meta[name="twitter:title"]', "name", "twitter:title", title);
+    setMetaTag('meta[name="twitter:description"]', "name", "twitter:description", description);
+    setMetaTag('meta[name="robots"]', "name", "robots", robots);
+    setCanonical(canonicalUrl);
+  }, [location.pathname, location.search]);
+
+  return null;
+}
+
 export default function App() {
   const location = useLocation();
   const isAuthRoute = location.pathname === "/login" || location.pathname === "/signup";
 
   return (
     <div className="min-h-screen bg-[#030209]">
+      <RouteMetadata />
       {!isAuthRoute && <Navbar />}
       <Suspense fallback={<RouteFallback />}>
         <Routes>

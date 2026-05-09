@@ -95,6 +95,25 @@ export const watchlistRouter = createRouter({
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
       const userId = ctx.user.id;
+      const existing = await db
+        .select()
+        .from(watchlist)
+        .where(and(eq(watchlist.userId, userId), eq(watchlist.animeId, input.animeId)))
+        .limit(1);
+
+      if (existing[0]) {
+        if (input.status && input.status !== existing[0].status) {
+          await db
+            .update(watchlist)
+            .set({ status: input.status })
+            .where(eq(watchlist.id, existing[0].id));
+          const refreshed = await db.select().from(watchlist).where(eq(watchlist.id, existing[0].id)).limit(1);
+          return refreshed[0];
+        }
+
+        return existing[0];
+      }
+
       const [inserted] = await db.insert(watchlist).values({
         userId,
         animeId: input.animeId,

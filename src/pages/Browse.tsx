@@ -295,7 +295,9 @@ export default function Browse() {
                     <h3 className="text-lg font-semibold text-white group-hover:text-[#8257f2] transition-colors mb-1">
                       {a.title}
                     </h3>
-                    {a.titleJp && <p className="text-sm text-[#8257f2] mb-2">{a.titleJp}</p>}
+                    {((a.titleEnglish && a.titleEnglish !== a.title) || (a.titleJp && a.titleJp !== a.title)) && (
+                      <p className="text-sm text-[#8257f2] mb-2">{a.titleEnglish && a.titleEnglish !== a.title ? a.titleEnglish : a.titleJp}</p>
+                    )}
                     <MixedSynopsisText className="mb-3 line-clamp-2 text-sm text-[#888888]">
                       {a.synopsis}
                     </MixedSynopsisText>
