@@ -25,6 +25,8 @@ export const userRoleEnum = pgEnum("role", ["user", "admin"]);
 export const animeStatusEnum = pgEnum("anime_status", ["ongoing", "completed", "upcoming"]);
 export const animeTypeEnum = pgEnum("anime_type", ["tv", "movie", "ova", "special"]);
 export const watchlistStatusEnum = pgEnum("watchlist_status", ["watching", "completed", "plan_to_watch", "dropped"]);
+export const scrapeJobTypeEnum = pgEnum("scrape_job_type", ["import_from_source", "sync_all_episodes", "refresh_anime_metadata"]);
+export const scrapeJobStatusEnum = pgEnum("scrape_job_status", ["pending", "running", "completed", "failed"]);
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -174,3 +176,45 @@ export const episodeBrokenReports = pgTable(
 
 export type EpisodeBrokenReport = typeof episodeBrokenReports.$inferSelect;
 export type InsertEpisodeBrokenReport = typeof episodeBrokenReports.$inferInsert;
+
+export type ScrapeJobPayload = {
+  source?: SourceSiteId;
+  slug?: string;
+  importEpisodes?: boolean;
+  animeId?: number;
+};
+
+export type ScrapeJobResult = {
+  success: boolean;
+  error?: string;
+  [key: string]: unknown;
+};
+
+export const scrapeJobs = pgTable(
+  "scrapeJobs",
+  {
+    id: serial("id").primaryKey(),
+    type: scrapeJobTypeEnum("type").notNull(),
+    status: scrapeJobStatusEnum("status").default("pending").notNull(),
+    payload: jsonb("payload").$type<ScrapeJobPayload>().notNull(),
+    result: jsonb("result").$type<ScrapeJobResult | null>(),
+    errorMessage: text("errorMessage"),
+    requestedByUserId: integer("requestedByUserId").references(() => users.id),
+    attempts: integer("attempts").default(0).notNull(),
+    maxAttempts: integer("maxAttempts").default(1).notNull(),
+    lockedBy: varchar("lockedBy", { length: 255 }),
+    availableAt: timestamp("availableAt", { mode: "date" }).defaultNow().notNull(),
+    startedAt: timestamp("startedAt", { mode: "date" }),
+    completedAt: timestamp("completedAt", { mode: "date" }),
+    createdAt: timestamp("createdAt", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt", { mode: "date" }).defaultNow().notNull().$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    statusAvailableIdx: index("scrape_jobs_status_available_idx").on(table.status, table.availableAt),
+    createdAtIdx: index("scrape_jobs_created_at_idx").on(table.createdAt),
+    requestedByIdx: index("scrape_jobs_requested_by_idx").on(table.requestedByUserId),
+  }),
+);
+
+export type ScrapeJob = typeof scrapeJobs.$inferSelect;
+export type InsertScrapeJob = typeof scrapeJobs.$inferInsert;

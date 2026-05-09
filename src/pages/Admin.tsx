@@ -648,10 +648,18 @@ function ImportAnimeForm() {
   const importMutation = trpc.scraper.importFromSource.useMutation({
     onSuccess: (data) => {
       setLoading(false);
+      if ("queued" in data && data.queued) {
+        setResult({
+          success: true,
+          message: `${data.message} Job #${data.jobId} is now waiting for the worker.`,
+        });
+        void utils.scraper.listScrapeJobs.invalidate();
+        return;
+      }
       if (data.success) {
         setResult({ success: true, message: `Imported successfully! Anime ID: ${data.animeId}, Episodes added: ${data.episodesAdded}` });
-        utils.anime.list.invalidate();
-        utils.dashboard.stats.invalidate();
+        void utils.anime.list.invalidate();
+        void utils.dashboard.stats.invalidate();
       } else {
         setResult({ success: false, message: data.error || "Failed to import" });
       }
@@ -717,6 +725,14 @@ function SyncEpisodesForm() {
   const syncMutation = trpc.scraper.syncAllEpisodes.useMutation({
     onSuccess: (data) => {
       setLoading(false);
+      if ("queued" in data && data.queued) {
+        setResult({
+          success: true,
+          message: `${data.message} Job #${data.jobId} is now waiting for the worker.`,
+        });
+        void utils.scraper.listScrapeJobs.invalidate();
+        return;
+      }
       if (data.success) {
         void utils.anime.list.invalidate();
         if (selectedAnimeId) {
@@ -738,6 +754,14 @@ function SyncEpisodesForm() {
   const refreshMetadataMutation = trpc.scraper.refreshAnimeMetadata.useMutation({
     onSuccess: (data) => {
       setRefreshing(false);
+      if ("queued" in data && data.queued) {
+        setResult({
+          success: true,
+          message: `${data.message} Job #${data.jobId} is now waiting for the worker.`,
+        });
+        void utils.scraper.listScrapeJobs.invalidate();
+        return;
+      }
       if (data.success) {
         void utils.anime.list.invalidate();
         setResult({ success: true, message: "Metadata refreshed successfully" });
@@ -815,6 +839,7 @@ function SyncEpisodesForm() {
 function LatestAnimeList() {
   const [source, setSource] = useState<SourceSiteId>("witanime");
   const [fetchedSource, setFetchedSource] = useState<SourceSiteId | null>(null);
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const utils = trpc.useUtils();
   const { data: sources } = trpc.scraper.getSources.useQuery();
   const selectedSource = sources?.find((site) => site.id === source);
@@ -834,14 +859,41 @@ function LatestAnimeList() {
 
   const fetchLatest = async () => {
     setFetchedSource(source);
+    setResult(null);
     await latestQuery.refetch();
   };
 
   const importMutation = trpc.scraper.importFromSource.useMutation({
-    onSuccess: () => {
-      utils.anime.list.invalidate();
-      utils.dashboard.stats.invalidate();
+    onSuccess: (data) => {
+      if ("queued" in data && data.queued) {
+        setResult({
+          success: true,
+          message: `${data.message} Job #${data.jobId} is now waiting for the worker.`,
+        });
+        void utils.scraper.listScrapeJobs.invalidate();
+        return;
+      }
+
+      if (data.success) {
+        setResult({
+          success: true,
+          message: `Imported successfully. Anime ID: ${data.animeId}, Episodes added: ${data.episodesAdded}`,
+        });
+        void utils.anime.list.invalidate();
+        void utils.dashboard.stats.invalidate();
+      } else {
+        setResult({
+          success: false,
+          message: data.error || "Failed to import from source",
+        });
+      }
     },
+    onError: (error) => {
+      setResult({
+        success: false,
+        message: error.message,
+      });
+    }
   });
 
   return (
@@ -863,6 +915,12 @@ function LatestAnimeList() {
           </button>
         </div>
       </div>
+
+      {result && (
+        <div className={`mb-4 rounded-lg p-3 text-sm ${result.success ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+          {result.message}
+        </div>
+      )}
 
       {animeList.length === 0 && fetched && !loading && (
         <div className="text-center py-8 text-[#888888]">
@@ -889,6 +947,114 @@ function LatestAnimeList() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ScrapeJobsPanel() {
+  const { data: executionMode } = trpc.scraper.getExecutionMode.useQuery();
+  const jobsQuery = trpc.scraper.listScrapeJobs.useQuery(
+    { limit: 10 },
+    {
+      refetchInterval: executionMode?.queued ? 5000 : 15000,
+    }
+  );
+  const jobs = jobsQuery.data ?? [];
+
+  return (
+    <div className="glass-panel p-5">
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h3 className="flex items-center gap-2 text-lg font-bold text-white">
+            <Activity className="h-5 w-5 text-[#693def]" />
+            Scraper Queue
+          </h3>
+          <p className="mt-1 text-sm text-[#888888]">
+            {executionMode?.message || "See recent scraper jobs and whether the worker has picked them up yet."}
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#cfc7ec]">
+          {executionMode?.mode || "inline"}
+        </div>
+      </div>
+
+      {jobsQuery.isLoading ? (
+        <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-[#9b93b8]">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading scraper jobs...
+        </div>
+      ) : jobs.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] py-10 text-center">
+          <Activity className="mx-auto mb-3 h-8 w-8 text-white/25" />
+          <p className="text-sm font-medium text-[#9b93b8]">No scraper jobs yet.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {jobs.map((job) => {
+            const statusClass =
+              job.status === "completed"
+                ? "bg-green-500/15 text-green-300"
+                : job.status === "running"
+                  ? "bg-sky-500/15 text-sky-300"
+                  : job.status === "failed"
+                    ? "bg-red-500/15 text-red-300"
+                    : "bg-amber-500/15 text-amber-300";
+
+            return (
+              <div
+                key={job.id}
+                className="rounded-2xl border border-white/8 bg-white/[0.04] p-4"
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-white">
+                        {job.label}
+                      </span>
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${statusClass}`}>
+                        {job.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-[#8f86ad]">
+                      {job.type.replace(/_/g, " ")}
+                      {job.source ? ` • ${job.source}` : ""}
+                      {job.animeSlug ? ` • ${job.animeSlug}` : ""}
+                    </p>
+                    {job.errorMessage && (
+                      <p className="mt-2 text-sm text-red-300">{job.errorMessage}</p>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs text-[#b8afda] sm:grid-cols-4">
+                    <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-[#8f86ad]">Job</p>
+                      <p className="mt-1 font-semibold text-white">#{job.id}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-[#8f86ad]">Created</p>
+                      <p className="mt-1 font-semibold text-white">
+                        {job.createdAt ? new Date(job.createdAt).toLocaleString() : "N/A"}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-[#8f86ad]">Started</p>
+                      <p className="mt-1 font-semibold text-white">
+                        {job.startedAt ? new Date(job.startedAt).toLocaleString() : "Waiting"}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-[#8f86ad]">Finished</p>
+                      <p className="mt-1 font-semibold text-white">
+                        {job.completedAt ? new Date(job.completedAt).toLocaleString() : "In progress"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1595,6 +1761,10 @@ export default function Admin() {
                   Latest Anime by source
                 </h3>
                 <LatestAnimeList />
+              </div>
+
+              <div className="lg:col-span-2">
+                <ScrapeJobsPanel />
               </div>
             </div>
           </motion.div>

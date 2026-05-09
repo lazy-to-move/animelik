@@ -75,6 +75,8 @@ KIMI_OPEN_URL=...
 OWNER_UNION_ID=...
 PORT=3000
 PUPPETEER_EXECUTABLE_PATH=/path/to/chrome
+SCRAPER_EXECUTION_MODE=inline
+SCRAPER_WORKER_POLL_MS=5000
 ```
 
 ## Scripts
@@ -83,6 +85,7 @@ PUPPETEER_EXECUTABLE_PATH=/path/to/chrome
 npm run dev
 npm run build
 npm start
+npm run start:worker
 npm run lint
 npm run test
 npm run db:push
@@ -91,6 +94,7 @@ npm run db:migrate
 ```
 
 `npm start` serves the built production app through `start-prod.mjs` and works on Windows.
+`npm run start:worker` runs the background scraper worker against the same database queue.
 
 ## Docker Deployment
 
@@ -115,14 +119,16 @@ The Docker image now includes the Linux libraries Puppeteer needs for scraping, 
 Render is a strong fit for this project because it supports:
 
 - long-running Node web service
+- a dedicated background worker for scraper jobs
 - PostgreSQL in the same Blueprint
 - Dockerfile-based deploys
 - a persistent disk for runtime-downloaded posters
-- background scraper scheduler support on an always-on web service
+- DB-backed queue processing without tying imports to the user-facing web process
 
 The repository includes [render.yaml](</C:/Users/Expert Gaming/Downloads/projects/Kimi_Agent_Full-Stack Anime Streaming Site/app/render.yaml>) with:
 
 - a Docker web service
+- a dedicated Docker worker service for scraper jobs
 - `npm run db:migrate:deploy` as a pre-deploy step
 - `/healthz` healthcheck
 - a 5 GB persistent disk mounted for imported poster storage
@@ -139,15 +145,35 @@ To deploy from the Render Dashboard:
    - `OWNER_UNION_ID` if you want to auto-promote a first owner
 5. Deploy the Blueprint.
 
-The current Blueprint uses Render's smallest always-on web service (`starter`) and smallest paid durable Postgres plan (`basic-256mb`) because:
+The current Blueprint uses:
+
+- `starter` for the public web service
+- `standard` for the Puppeteer-heavy scraper worker
+- `basic-256mb` for durable Postgres
+
+That split keeps the public site lean while giving the worker enough headroom for browser automation.
+
+### Paid worker mode
+
+This branch supports two scraper execution modes:
+
+- `inline`: local development and one-process setups
+- `queue`: admin actions create DB jobs, and `npm run start:worker` drains them
+
+In production on this branch, `queue` is the default. The admin dashboard shows recent scraper jobs so you can see whether the worker is pending, running, completed, or failed.
+
+Because the worker and web service do not share a writable filesystem, queued imports keep remote cover/banner image URLs by default. If you later move media to object storage, the worker can safely upload covers there instead.
+
+The current Blueprint uses paid services because:
 
 - free web services can sleep, which is bad for the scraper scheduler
 - free Postgres expires after 30 days
 - persistent disks are for paid services
+- the scraper worker needs more memory than a 512 MB instance
 
 ### Deploy to Render
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/wizard404error/synx-anime-site)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/jraya106/animelik)
 
 If you keep the GitHub repo private, Render's GitHub app must have access to it.
 
@@ -163,8 +189,8 @@ Use `/admin` as an admin user to:
 - manage episodes
 - manage categories
 - import anime from supported source sites
-- sync episode video sources
-- refresh stored anime metadata
+- queue full episode source sync jobs
+- queue anime metadata refresh jobs
 
 ### Create or update an admin user
 

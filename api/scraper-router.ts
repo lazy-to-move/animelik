@@ -1,21 +1,29 @@
+import { inArray } from "drizzle-orm";
 import { z } from "zod";
-import { eq, inArray } from "drizzle-orm";
+import { anime } from "@db/schema";
 import { createRouter, adminQuery, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { anime, animeGenres, episodes, categories } from "@db/schema";
 import {
   getScraperProvider,
   listScraperProviders,
 } from "./services/scraper/provider-registry";
+import { SOURCE_SITE_IDS } from "./services/scraper/types";
 import {
-  SOURCE_SITE_IDS,
-  type ScraperAnime,
-  type SourceSiteId,
-} from "./services/scraper/types";
-import { enrichAnimeMetadata } from "./services/scraper/metadata-enrichment";
-import { ensureImportedAnimeCoversDir } from "./lib/imported-media";
-import { join } from "path";
-import { writeFileSync } from "fs";
+  getScraperExecutionMessage,
+  getScraperExecutionMode,
+  isScraperQueueMode,
+} from "./lib/scraper-execution";
+import {
+  enqueueScrapeJob,
+  listRecentScrapeJobs,
+} from "./services/scraper/job-queue";
+import {
+  runImportFromSourceOperation,
+  runRefreshAnimeMetadataOperation,
+  runScrapeAnimeOperation,
+  runSyncAllEpisodesOperation,
+  runSyncEpisodeSourcesOperation,
+} from "./services/scraper/operations";
 
 const sourceSiteSchema = z.enum(SOURCE_SITE_IDS);
 
@@ -23,518 +31,16 @@ function normalizeStoredSlug(slug: string) {
   return slug.trim().replace(/^\/+|\/+$/g, "");
 }
 
-async function downloadImage(
-  url: string,
-  slug: string
-): Promise<string | null> {
-  if (!url || !url.startsWith("http")) return null;
-
-  try {
-    const response = await fetch(url);
-    const contentType =
-      response.headers.get("content-type")?.toLowerCase() ?? "";
-    if (!response.ok || !contentType.startsWith("image/")) return null;
-
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength < 1024) return null;
-
-    const coversDir = ensureImportedAnimeCoversDir();
-    const ext =
-      contentType.split("/")[1]?.split(";")[0]?.replace("jpeg", "jpg") ||
-      url.split(".").pop()?.split("?")[0] ||
-      "jpg";
-    const filename = `${slug}.${ext}`;
-    writeFileSync(join(coversDir, filename), Buffer.from(buffer));
-    return `/anime-covers/${filename}`;
-  } catch (err) {
-    console.error("Failed to download image:", err);
-    return null;
-  }
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
-function toCategorySlug(name: string) {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\u0600-\u06FF]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function normalizeCategoryNames(categoryName?: string) {
-  if (!categoryName) return [];
-
-  return Array.from(
-    new Set(
-      categoryName
-        .split(/\||,|،|\//)
-        .map(part => part.replace(/\s+/g, " ").trim())
-        .filter(Boolean)
-        .map(part => part.slice(0, 100))
-    )
-  );
-}
-
-function humanizeSlug(slug: string) {
-  return normalizeStoredSlug(slug)
-    .replace(/^anime\//i, "")
-    .replace(/^انمي-?/i, "")
-    .replace(/[-_]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 255);
-}
-
-function normalizeTitle(title: string | undefined, slug: string) {
-  const cleaned = (title ?? "").replace(/\s+/g, " ").trim();
-  if (
-    !cleaned ||
-    ["risto", "تصفح", "unknown"].includes(cleaned.toLowerCase())
-  ) {
-    return humanizeSlug(slug);
-  }
-
-  return cleaned.slice(0, 255);
-}
-
-function normalizeTitleSynonyms(values?: string[]) {
-  if (!values?.length) return undefined;
-
-  const normalized = Array.from(
-    new Set(
-      values
-        .map(value => value.replace(/\s+/g, " ").trim())
-        .filter(Boolean)
-        .map(value => value.slice(0, 255))
-    )
-  );
-
-  return normalized.length > 0 ? normalized : undefined;
-}
-
-function normalizeSynopsis(synopsis?: string) {
-  if (!synopsis) return "";
-
-  const cleaned = synopsis
-    .replace(/\s+/g, " ")
-    .replace(/\{"prefetch":.*$/i, "")
-    .replace(/عودة الى أعلي.*$/i, "")
-    .trim();
-
-  return cleaned.slice(0, 4000);
-}
-
-function normalizeStudio(studio?: string) {
-  if (!studio) return undefined;
-  const cleaned = studio.replace(/\s+/g, " ").trim();
-  return cleaned ? cleaned.slice(0, 100) : undefined;
-}
-
-function normalizeDuration(duration?: number) {
-  if (
-    !duration ||
-    !Number.isFinite(duration) ||
-    duration <= 0 ||
-    duration > 400
-  )
-    return undefined;
-  return Math.round(duration);
-}
-
-function normalizeReleaseYear(year?: number) {
-  if (!year || !Number.isFinite(year)) return undefined;
-  const currentYear = new Date().getFullYear() + 2;
-  return year >= 1950 && year <= currentYear ? year : undefined;
-}
-
-function normalizeRating(rating?: string) {
-  if (!rating) return undefined;
-
-  const text = rating.replace(/\s+/g, " ").trim();
-  const explicitMatch = text.match(/(\d+(?:\.\d+)?)\s*\/\s*10/i);
-  const numeric = explicitMatch?.[1] ?? text.match(/\d+(?:\.\d+)?/)?.[0];
-  if (!numeric) return undefined;
-
-  const value = Number.parseFloat(numeric);
-  if (!Number.isFinite(value) || value <= 0 || value > 10) return undefined;
-  return `${value.toFixed(1)} / 10`;
-}
-
-function inferAnimeStatus(
-  status: ScraperAnime["status"],
-  episodesCount: number,
-  existingStatus?: ScraperAnime["status"] | null
-): ScraperAnime["status"] {
-  if (status === "completed") return "completed";
-  if (status === "ongoing") return "ongoing";
-
-  if (episodesCount > 0) {
-    return existingStatus === "completed" ? "completed" : "ongoing";
-  }
-
-  return existingStatus ?? "upcoming";
-}
-
-function normalizeImagePath(path?: string | null) {
-  if (!path) return null;
-  const cleaned = path.trim();
-  if (!cleaned) return null;
-  if (
-    cleaned.startsWith("/anime-covers/") ||
-    cleaned.startsWith("http://") ||
-    cleaned.startsWith("https://")
-  ) {
-    return cleaned;
-  }
-
-  return null;
-}
-
-function choosePreferredImage(
-  primary?: string | null,
-  fallback?: string | null
-) {
-  return normalizeImagePath(primary) ?? normalizeImagePath(fallback) ?? null;
-}
-
-function normalizeEpisodeTitle(
-  title: string | undefined,
-  episodeNumber: number
-) {
-  const cleaned = (title ?? "").replace(/\s+/g, " ").trim();
-  if (!cleaned) return `Episode ${episodeNumber}`;
-  return cleaned.slice(0, 255);
-}
-
-function normalizeEpisodeThumbnail(thumbnail?: string) {
-  if (!thumbnail) return undefined;
-  const cleaned = thumbnail.trim();
-  return cleaned || undefined;
-}
-
-async function ensureCategoryIds(
-  db: ReturnType<typeof getDb>,
-  categoryName?: string
-) {
-  const normalizedNames = normalizeCategoryNames(categoryName);
-  const categoryIds: number[] = [];
-
-  for (const normalizedName of normalizedNames) {
-    const existingCat = await db
-      .select()
-      .from(categories)
-      .where(eq(categories.name, normalizedName))
-      .limit(1);
-    if (existingCat.length > 0) {
-      categoryIds.push(existingCat[0].id);
-      continue;
-    }
-
-    const slug = toCategorySlug(normalizedName) || `category-${Date.now()}`;
-    const [newCat] = await db
-      .insert(categories)
-      .values({ name: normalizedName, slug })
-      .returning({ id: categories.id });
-    categoryIds.push(newCat.id);
-  }
-
-  return categoryIds;
-}
-
-async function syncAnimeGenreLinks(
-  db: ReturnType<typeof getDb>,
-  animeId: number,
-  categoryIds: number[]
-) {
-  await db.delete(animeGenres).where(eq(animeGenres.animeId, animeId));
-
-  if (categoryIds.length === 0) return;
-
-  await db.insert(animeGenres).values(
-    categoryIds.map(categoryId => ({
-      animeId,
-      categoryId,
-    }))
-  );
-}
-
-function toScoreValue(rating?: string) {
-  if (!rating) return "0.00";
-  const numeric = Number.parseFloat(
-    rating.replace(",", ".").match(/\d+(\.\d+)?/)?.[0] ?? ""
-  );
-  if (Number.isNaN(numeric)) return "0.00";
-  return Math.min(10, Math.max(0, numeric)).toFixed(2);
-}
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  ms: number,
-  label: string
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`${label} timed out after ${ms}ms`)),
-          ms
-        );
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-function mergeScrapedAndEnrichedAnime(
-  siteData: ScraperAnime,
-  enrichedData: Partial<ScraperAnime>
-): ScraperAnime {
+function queuedResponse(jobId: number, message: string) {
   return {
-    ...siteData,
-    ...enrichedData,
-    synopsis:
-      normalizeSynopsis(siteData.synopsis) ||
-      normalizeSynopsis(enrichedData.synopsis) ||
-      "",
-    status: enrichedData.status ?? siteData.status,
-    type: siteData.type,
-    episodesCount: siteData.episodesCount,
-  };
-}
-
-async function persistAnimeRecord({
-  db,
-  source,
-  slug,
-  scrapedData,
-  scrapedEpisodesCount,
-}: {
-  db: ReturnType<typeof getDb>;
-  source: SourceSiteId;
-  slug: string;
-  scrapedData: ScraperAnime;
-  scrapedEpisodesCount: number;
-}) {
-  const normalizedSlug = normalizeStoredSlug(slug);
-  const existingAnime = await db
-    .select()
-    .from(anime)
-    .where(eq(anime.slug, normalizedSlug))
-    .limit(1);
-  const categoryIds = await ensureCategoryIds(db, scrapedData.categoryName);
-  const categoryId = categoryIds[0];
-
-  let savedCoverImage = scrapedData.coverImage ?? null;
-  if (scrapedData.coverImage?.startsWith("http")) {
-    savedCoverImage =
-      (await downloadImage(scrapedData.coverImage, normalizedSlug)) ||
-      scrapedData.coverImage;
-  }
-
-  let savedBannerImage = scrapedData.bannerImage ?? savedCoverImage ?? null;
-  if (
-    scrapedData.bannerImage?.startsWith("http") &&
-    scrapedData.bannerImage !== scrapedData.coverImage
-  ) {
-    savedBannerImage =
-      (await downloadImage(
-        scrapedData.bannerImage,
-        `${normalizedSlug}-banner`
-      )) || scrapedData.bannerImage;
-  }
-
-  const existing = existingAnime[0];
-  const normalizedTitle = normalizeTitle(scrapedData.title, normalizedSlug);
-  const normalizedTitleEnglish = scrapedData.titleEnglish
-    ? normalizeTitle(scrapedData.titleEnglish, normalizedSlug)
-    : (existing?.titleEnglish ?? undefined);
-  const normalizedTitleSynonyms =
-    normalizeTitleSynonyms(scrapedData.titleSynonyms) ??
-    existing?.titleSynonyms ??
-    undefined;
-  const normalizedSynopsis = normalizeSynopsis(scrapedData.synopsis);
-  const normalizedRating = normalizeRating(scrapedData.rating);
-  const normalizedStudio = normalizeStudio(scrapedData.studio);
-  const normalizedReleaseYear = normalizeReleaseYear(scrapedData.releaseYear);
-  const normalizedDuration = normalizeDuration(scrapedData.duration);
-  const normalizedEpisodesCount = Math.min(
-    scrapedEpisodesCount || scrapedData.episodesCount,
-    500
-  );
-  const normalizedStatus = inferAnimeStatus(
-    scrapedData.status,
-    normalizedEpisodesCount,
-    existing?.status ?? undefined
-  );
-  const clearStaleAnimeOnlyMetadata =
-    source === "stardima" &&
-    !scrapedData.externalId &&
-    !scrapedData.titleJp &&
-    !normalizeTitleSynonyms(scrapedData.titleSynonyms);
-
-  const payload = {
-    title: normalizedTitle,
-    titleEnglish: normalizedTitleEnglish,
-    titleJp:
-      scrapedData.titleJp ??
-      (clearStaleAnimeOnlyMetadata ? null : (existing?.titleJp ?? undefined)),
-    titleSynonyms: clearStaleAnimeOnlyMetadata ? null : normalizedTitleSynonyms,
-    synopsis: normalizedSynopsis || existing?.synopsis || "",
-    coverImage: choosePreferredImage(savedCoverImage, existing?.coverImage),
-    bannerImage:
-      choosePreferredImage(
-        savedBannerImage,
-        clearStaleAnimeOnlyMetadata ? null : existing?.bannerImage
-      ) ?? choosePreferredImage(savedCoverImage, existing?.coverImage),
-    status: normalizedStatus,
-    type: scrapedData.type,
-    episodesCount: normalizedEpisodesCount,
-    externalId:
-      scrapedData.externalId ??
-      (clearStaleAnimeOnlyMetadata
-        ? null
-        : (existing?.externalId ?? undefined)),
-    externalSlug: normalizedSlug,
-    sourceSite: source,
-    lastScrapedAt: new Date(),
-    rating:
-      normalizedRating ??
-      (clearStaleAnimeOnlyMetadata ? null : (existing?.rating ?? undefined)),
-    releaseYear: normalizedReleaseYear ?? existing?.releaseYear ?? undefined,
-    studio:
-      normalizedStudio ??
-      (clearStaleAnimeOnlyMetadata ? null : (existing?.studio ?? undefined)),
-    duration: normalizedDuration ?? existing?.duration ?? undefined,
-    score: normalizedRating
-      ? toScoreValue(normalizedRating)
-      : clearStaleAnimeOnlyMetadata
-        ? "0.00"
-        : (existing?.score ?? "0.00"),
-    categoryId,
-  } as const;
-
-  if (existingAnime.length > 0) {
-    await db
-      .update(anime)
-      .set(payload)
-      .where(eq(anime.id, existingAnime[0].id));
-    await syncAnimeGenreLinks(db, existingAnime[0].id, categoryIds);
-    return { animeId: existingAnime[0].id, action: "updated" as const };
-  }
-
-  const [inserted] = await db
-    .insert(anime)
-    .values({
-      ...payload,
-      slug: normalizedSlug,
-    })
-    .returning({ id: anime.id });
-
-  await syncAnimeGenreLinks(db, inserted.id, categoryIds);
-
-  return { animeId: inserted.id, action: "created" as const };
-}
-
-async function reconcileEpisodesForAnime({
-  db,
-  animeId,
-  scrapedEpisodes,
-}: {
-  db: ReturnType<typeof getDb>;
-  animeId: number;
-  scrapedEpisodes: Awaited<
-    ReturnType<ReturnType<typeof getScraperProvider>["scrapeAnimeEpisodes"]>
-  >;
-}) {
-  const normalizedEpisodes = scrapedEpisodes
-    .filter(
-      episode =>
-        Number.isFinite(episode.number) &&
-        episode.number > 0 &&
-        episode.number <= 500
-    )
-    .map(episode => ({
-      ...episode,
-      title: normalizeEpisodeTitle(episode.title, episode.number),
-      thumbnail: normalizeEpisodeThumbnail(episode.thumbnail),
-      synopsis: normalizeSynopsis(episode.synopsis),
-    }));
-
-  const desiredNumbers = Array.from(
-    new Set(normalizedEpisodes.map(episode => episode.number))
-  );
-  const existingEpisodes = await db
-    .select()
-    .from(episodes)
-    .where(eq(episodes.animeId, animeId));
-  const existingByNumber = new Map(
-    existingEpisodes.map(episode => [episode.number, episode] as const)
-  );
-
-  const invalidNumbers = existingEpisodes
-    .filter(
-      episode =>
-        episode.number <= 0 ||
-        episode.number > 500 ||
-        (desiredNumbers.length > 0 && !desiredNumbers.includes(episode.number))
-    )
-    .map(episode => episode.id);
-
-  if (invalidNumbers.length > 0) {
-    await db.delete(episodes).where(inArray(episodes.id, invalidNumbers));
-  }
-
-  let addedEpisodes = 0;
-  let updatedEpisodes = 0;
-
-  for (const scrapedEpisode of normalizedEpisodes) {
-    const existingEpisode = existingByNumber.get(scrapedEpisode.number);
-
-    if (!existingEpisode) {
-      await db.insert(episodes).values({
-        animeId,
-        number: scrapedEpisode.number,
-        title: scrapedEpisode.title,
-        synopsis: scrapedEpisode.synopsis || undefined,
-        thumbnail: scrapedEpisode.thumbnail,
-      });
-      addedEpisodes++;
-      continue;
-    }
-
-    await db
-      .update(episodes)
-      .set({
-        title:
-          scrapedEpisode.title ||
-          existingEpisode.title ||
-          `Episode ${scrapedEpisode.number}`,
-        synopsis:
-          scrapedEpisode.synopsis || existingEpisode.synopsis || undefined,
-        thumbnail: scrapedEpisode.thumbnail ?? existingEpisode.thumbnail,
-      })
-      .where(eq(episodes.id, existingEpisode.id));
-    updatedEpisodes++;
-  }
-
-  if (desiredNumbers.length > 0) {
-    await db
-      .update(anime)
-      .set({ episodesCount: desiredNumbers.length })
-      .where(eq(anime.id, animeId));
-  }
-
-  const refreshedEpisodes = await db
-    .select()
-    .from(episodes)
-    .where(eq(episodes.animeId, animeId));
-  return {
-    addedEpisodes,
-    updatedEpisodes,
-    currentEpisodes: refreshedEpisodes,
+    success: true as const,
+    queued: true as const,
+    jobId,
+    message,
   };
 }
 
@@ -546,32 +52,33 @@ export const scraperRouter = createRouter({
         source: sourceSiteSchema.default("witanime"),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       try {
-        const provider = getScraperProvider(input.source);
-        const scrapedData = await provider.scrapeAnimeInfo(input.slug);
-        if (!scrapedData) {
-          return { success: false, error: "Failed to scrape anime" };
+        const slug = normalizeStoredSlug(input.slug);
+        if (isScraperQueueMode()) {
+          const job = await enqueueScrapeJob({
+            type: "import_from_source",
+            payload: {
+              source: input.source,
+              slug,
+              importEpisodes: false,
+            },
+            requestedByUserId: ctx.user.id,
+          });
+
+          return queuedResponse(
+            job.id,
+            "Anime scrape was queued for the background worker."
+          );
         }
-        const enrichedData = mergeScrapedAndEnrichedAnime(
-          scrapedData,
-          await enrichAnimeMetadata(scrapedData)
-        );
 
-        const db = getDb();
-        const scrapedEpisodes = await provider.scrapeAnimeEpisodes(input.slug);
-        const result = await persistAnimeRecord({
-          db,
+        return await runScrapeAnimeOperation({
           source: input.source,
-          slug: input.slug,
-          scrapedData: enrichedData,
-          scrapedEpisodesCount: scrapedEpisodes.length,
+          slug,
         });
-
-        return { success: true, ...result };
-      } catch (err) {
-        console.error("Error in scrapeAnime:", err);
-        return { success: false, error: String(err) };
+      } catch (error) {
+        console.error("Error in scrapeAnime:", error);
+        return { success: false, error: getErrorMessage(error) };
       }
     }),
 
@@ -579,207 +86,58 @@ export const scraperRouter = createRouter({
     .input(z.object({ episodeId: z.number() }))
     .mutation(async ({ input }) => {
       try {
-        const db = getDb();
-        const episode = await db
-          .select()
-          .from(episodes)
-          .where(eq(episodes.id, input.episodeId))
-          .limit(1);
-
-        if (!episode.length || !episode[0].animeId) {
-          return { success: false, error: "Episode not found" };
-        }
-
-        const animeRecord = await db
-          .select()
-          .from(anime)
-          .where(eq(anime.id, episode[0].animeId))
-          .limit(1);
-        if (!animeRecord.length || !animeRecord[0].externalSlug) {
-          return { success: false, error: "Anime has no external slug" };
-        }
-
-        const provider = getScraperProvider(
-          animeRecord[0].sourceSite ?? "witanime"
-        );
-        const scrapedEpisodes = await provider.scrapeAnimeEpisodes(
-          animeRecord[0].externalSlug
-        );
-        const scrapedEpisode = scrapedEpisodes.find(
-          ep => ep.number === episode[0].number
-        );
-        if (!scrapedEpisode) {
-          return {
-            success: false,
-            error: "Could not match episode on source site",
-          };
-        }
-
-        const sources = await provider.scrapeEpisodeSources(scrapedEpisode.id);
-        if (sources.length === 0) {
-          return { success: false, error: "No sources found" };
-        }
-
-        await db
-          .update(episodes)
-          .set({ videoSources: sources })
-          .where(eq(episodes.id, input.episodeId));
-        return { success: true, sourcesCount: sources.length };
-      } catch (err) {
-        console.error("Error in syncEpisodeSources:", err);
-        return { success: false, error: String(err) };
+        return await runSyncEpisodeSourcesOperation(input);
+      } catch (error) {
+        console.error("Error in syncEpisodeSources:", error);
+        return { success: false, error: getErrorMessage(error) };
       }
     }),
 
   syncAllEpisodes: adminQuery
     .input(z.object({ animeId: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       try {
-        const db = getDb();
-        const animeRecord = await db
-          .select()
-          .from(anime)
-          .where(eq(anime.id, input.animeId))
-          .limit(1);
+        if (isScraperQueueMode()) {
+          const job = await enqueueScrapeJob({
+            type: "sync_all_episodes",
+            payload: { animeId: input.animeId },
+            requestedByUserId: ctx.user.id,
+          });
 
-        if (!animeRecord.length || !animeRecord[0].externalSlug) {
-          return { success: false, error: "Anime has no external slug" };
+          return queuedResponse(
+            job.id,
+            "Episode source sync was queued for the background worker."
+          );
         }
 
-        const provider = getScraperProvider(
-          animeRecord[0].sourceSite ?? "witanime"
-        );
-        const scrapedEpisodes = await provider.scrapeAnimeEpisodes(
-          animeRecord[0].externalSlug
-        );
-        const reconciled = await reconcileEpisodesForAnime({
-          db,
-          animeId: input.animeId,
-          scrapedEpisodes,
-        });
-        const scrapedByNumber = new Map(
-          scrapedEpisodes.map(ep => [ep.number, ep] as const)
-        );
-        const episodeList = reconciled.currentEpisodes.sort(
-          (a, b) => a.number - b.number
-        );
-
-        let synced = 0;
-        let missing = 0;
-        let failed = 0;
-
-        for (const ep of episodeList) {
-          try {
-            const scrapedEpisode = scrapedByNumber.get(ep.number);
-            if (!scrapedEpisode) {
-              missing++;
-              continue;
-            }
-
-            const sources = await withTimeout(
-              provider.scrapeEpisodeSources(scrapedEpisode.id),
-              15000,
-              `Sync episode ${ep.number}`
-            );
-            if (sources.length > 0) {
-              await db
-                .update(episodes)
-                .set({ videoSources: sources })
-                .where(eq(episodes.id, ep.id));
-              synced++;
-            } else {
-              failed++;
-            }
-
-            await new Promise(resolve => setTimeout(resolve, 150));
-          } catch (err) {
-            console.error(`Failed to sync episode ${ep.number}:`, err);
-            failed++;
-          }
-        }
-
-        if (synced === 0) {
-          return {
-            success: false,
-            error:
-              failed > 0
-                ? `No working sources were found. Failed ${failed} episodes${missing ? ` and missed ${missing}` : ""}.`
-                : "No working sources were found.",
-          };
-        }
-
-        return {
-          success: true,
-          syncedCount: synced,
-          total: episodeList.length,
-          missingCount: missing,
-          failedCount: failed,
-        };
-      } catch (err) {
-        console.error("Error in syncAllEpisodes:", err);
-        return { success: false, error: String(err) };
+        return await runSyncAllEpisodesOperation(input);
+      } catch (error) {
+        console.error("Error in syncAllEpisodes:", error);
+        return { success: false, error: getErrorMessage(error) };
       }
     }),
 
   refreshAnimeMetadata: adminQuery
     .input(z.object({ animeId: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       try {
-        const db = getDb();
-        const existingAnime = await db
-          .select()
-          .from(anime)
-          .where(eq(anime.id, input.animeId))
-          .limit(1);
-        if (!existingAnime.length) {
-          return { success: false, error: "Anime not found" };
+        if (isScraperQueueMode()) {
+          const job = await enqueueScrapeJob({
+            type: "refresh_anime_metadata",
+            payload: { animeId: input.animeId },
+            requestedByUserId: ctx.user.id,
+          });
+
+          return queuedResponse(
+            job.id,
+            "Metadata refresh was queued for the background worker."
+          );
         }
 
-        const current = existingAnime[0];
-        const source = current.sourceSite ?? "witanime";
-        const provider = getScraperProvider(source);
-        const scrapedData = current.externalSlug
-          ? await provider.scrapeAnimeInfo(current.externalSlug)
-          : null;
-
-        const baseData: ScraperAnime = {
-          slug: current.slug,
-          title: current.title,
-          titleEnglish: current.titleEnglish ?? undefined,
-          titleJp: current.titleJp ?? undefined,
-          titleSynonyms: current.titleSynonyms ?? undefined,
-          synopsis: current.synopsis,
-          coverImage: current.coverImage ?? undefined,
-          bannerImage: current.bannerImage ?? undefined,
-          status: current.status ?? "upcoming",
-          type: current.type ?? "tv",
-          episodesCount: current.episodesCount ?? 0,
-          externalId: current.externalId ?? undefined,
-          rating: current.rating ?? undefined,
-          releaseYear: current.releaseYear ?? undefined,
-          studio: current.studio ?? undefined,
-          categoryName: undefined,
-          duration: current.duration ?? undefined,
-        };
-
-        const mergedData = { ...baseData, ...(scrapedData ?? {}) };
-        const enrichedData = mergeScrapedAndEnrichedAnime(
-          mergedData,
-          await enrichAnimeMetadata(mergedData)
-        );
-
-        const result = await persistAnimeRecord({
-          db,
-          source,
-          slug: current.slug,
-          scrapedData: enrichedData,
-          scrapedEpisodesCount: current.episodesCount ?? 0,
-        });
-
-        return { success: true, ...result };
-      } catch (err) {
-        console.error("Error in refreshAnimeMetadata:", err);
-        return { success: false, error: String(err) };
+        return await runRefreshAnimeMetadataOperation(input);
+      } catch (error) {
+        console.error("Error in refreshAnimeMetadata:", error);
+        return { success: false, error: getErrorMessage(error) };
       }
     }),
 
@@ -795,9 +153,9 @@ export const scraperRouter = createRouter({
         const provider = getScraperProvider(input.source);
         const latest = await provider.scrapeLatestAnime(input.limit);
         return { success: true, data: latest };
-      } catch (err) {
-        console.error("Error in getLatestFromSource:", err);
-        return { success: false, error: String(err), data: [] };
+      } catch (error) {
+        console.error("Error in getLatestFromSource:", error);
+        return { success: false, error: getErrorMessage(error), data: [] };
       }
     }),
 
@@ -813,9 +171,9 @@ export const scraperRouter = createRouter({
         const provider = getScraperProvider(input.source);
         const results = await provider.searchAnime(input.query);
         return { success: true, data: results };
-      } catch (err) {
-        console.error("Error in searchSource:", err);
-        return { success: false, error: String(err), data: [] };
+      } catch (error) {
+        console.error("Error in searchSource:", error);
+        return { success: false, error: getErrorMessage(error), data: [] };
       }
     }),
 
@@ -827,68 +185,94 @@ export const scraperRouter = createRouter({
         importEpisodes: z.boolean().default(true),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       try {
-        const db = getDb();
-        const provider = getScraperProvider(input.source);
-        const scrapedData = await provider.scrapeAnimeInfo(input.slug);
-        if (!scrapedData) {
-          return { success: false, error: "Failed to scrape anime info" };
-        }
-        const canonicalSlug = normalizeStoredSlug(
-          scrapedData.slug || input.slug
-        );
-        const enrichedData = mergeScrapedAndEnrichedAnime(
-          scrapedData,
-          await enrichAnimeMetadata(scrapedData)
-        );
+        const slug = normalizeStoredSlug(input.slug);
 
-        const scrapedEpisodes = input.importEpisodes
-          ? await provider.scrapeAnimeEpisodes(canonicalSlug)
-          : [];
-        if (input.importEpisodes && scrapedEpisodes.length === 0) {
-          return {
-            success: false,
-            error: `No episodes were found on ${input.source} for "${canonicalSlug}".`,
-          };
-        }
-
-        const persisted = await persistAnimeRecord({
-          db,
-          source: input.source,
-          slug: canonicalSlug,
-          scrapedData: enrichedData,
-          scrapedEpisodesCount: scrapedEpisodes.length,
-        });
-        const animeId = persisted.animeId;
-
-        if (input.importEpisodes && scrapedEpisodes.length > 0) {
-          const reconciled = await reconcileEpisodesForAnime({
-            db,
-            animeId,
-            scrapedEpisodes,
+        if (isScraperQueueMode()) {
+          const job = await enqueueScrapeJob({
+            type: "import_from_source",
+            payload: {
+              source: input.source,
+              slug,
+              importEpisodes: input.importEpisodes,
+            },
+            requestedByUserId: ctx.user.id,
           });
 
-          return {
-            success: true,
-            animeId,
-            action: persisted.action,
-            episodesAdded: reconciled.addedEpisodes,
-            episodesUpdated: reconciled.updatedEpisodes,
-            episodesFound: scrapedEpisodes.length,
-          };
+          return queuedResponse(
+            job.id,
+            "Import job was queued for the background worker."
+          );
         }
 
-        return {
-          success: true,
-          animeId,
-          action: persisted.action,
-          episodesAdded: 0,
-        };
-      } catch (err) {
-        console.error("Error in importFromSource:", err);
-        return { success: false, error: String(err) };
+        return await runImportFromSourceOperation({
+          source: input.source,
+          slug,
+          importEpisodes: input.importEpisodes,
+        });
+      } catch (error) {
+        console.error("Error in importFromSource:", error);
+        return { success: false, error: getErrorMessage(error) };
       }
+    }),
+
+  getExecutionMode: adminQuery.query(() => {
+    const mode = getScraperExecutionMode();
+    return {
+      mode,
+      queued: mode === "queue",
+      message: getScraperExecutionMessage(),
+    };
+  }),
+
+  listScrapeJobs: adminQuery
+    .input(z.object({ limit: z.number().min(1).max(50).default(20) }))
+    .query(async ({ input }) => {
+      const db = getDb();
+      const jobs = await listRecentScrapeJobs({ limit: input.limit, db });
+      const animeIds = Array.from(
+        new Set(
+          jobs
+            .map((job) => job.payload?.animeId)
+            .filter((animeId): animeId is number => Number.isFinite(animeId))
+        )
+      );
+
+      const animeRecords =
+        animeIds.length > 0
+          ? await db
+              .select({
+                id: anime.id,
+                title: anime.title,
+                slug: anime.slug,
+                sourceSite: anime.sourceSite,
+              })
+              .from(anime)
+              .where(inArray(anime.id, animeIds))
+          : [];
+      const animeById = new Map(
+        animeRecords.map((record) => [record.id, record] as const)
+      );
+
+      return jobs.map((job) => {
+        const relatedAnime =
+          typeof job.payload?.animeId === "number"
+            ? animeById.get(job.payload.animeId)
+            : undefined;
+
+        return {
+          ...job,
+          label:
+            relatedAnime?.title ??
+            job.payload?.slug ??
+            `${job.type.replace(/_/g, " ")}`,
+          animeTitle: relatedAnime?.title ?? null,
+          animeSlug: relatedAnime?.slug ?? job.payload?.slug ?? null,
+          source:
+            job.payload?.source ?? relatedAnime?.sourceSite ?? null,
+        };
+      });
     }),
 
   getSources: publicQuery.query(() => {
