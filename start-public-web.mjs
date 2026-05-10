@@ -8,7 +8,7 @@ process.env.NEXT_TELEMETRY_DISABLED = process.env.NEXT_TELEMETRY_DISABLED || "1"
 const child = spawn(
   process.execPath,
   [
-    "./apps/public-web/node_modules/next/dist/bin/next",
+    "./node_modules/next/dist/bin/next",
     "start",
     "-H",
     process.env.HOSTNAME,
@@ -16,6 +16,7 @@ const child = spawn(
     process.env.PORT,
   ],
   {
+    cwd: "apps/public-web",
     stdio: "inherit",
     env: process.env,
   },
