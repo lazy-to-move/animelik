@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { createServer, type Server } from "http";
 import { hostname } from "os";
 import { Worker as BullWorker } from "bullmq";
 import type { ScrapeJob } from "@db/schema";
@@ -32,9 +33,48 @@ const workerId =
   `${hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`;
 
 let shuttingDown = false;
+const healthState = {
+  ok: false,
+  message: "Worker is starting.",
+  verifiedAt: null as string | null,
+};
+let healthServer: Server | null = null;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function startHealthServer() {
+  const port = Number.parseInt(process.env.PORT ?? "", 10);
+  if (!Number.isFinite(port) || port <= 0) {
+    return;
+  }
+
+  healthServer = createServer((req, res) => {
+    if (!req.url?.startsWith("/healthz")) {
+      res.statusCode = 404;
+      res.end("Not Found");
+      return;
+    }
+
+    const status = healthState.ok ? 200 : 503;
+    res.writeHead(status, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    });
+    res.end(
+      JSON.stringify({
+        ok: healthState.ok,
+        workerId,
+        message: healthState.message,
+        verifiedAt: healthState.verifiedAt,
+      }),
+    );
+  });
+
+  healthServer.listen(port, "0.0.0.0", () => {
+    console.log(`[scraper-worker] health server listening on http://0.0.0.0:${port}/healthz`);
+  });
 }
 
 async function processJob(job: ScrapeJob) {
@@ -191,6 +231,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
+startHealthServer();
+
 try {
   const runtimeReadiness = assertRuntimeReadiness({ role: "worker" });
   const dependencyStatus = await verifyRuntimeDependencies({ role: "worker" });
@@ -204,6 +246,9 @@ try {
   }
   console.log(`[scraper-worker] ${dependencyStatus.queue.message}`);
   console.log(`[scraper-worker] ${dependencyStatus.media.message}`);
+  healthState.ok = true;
+  healthState.message = `${dependencyStatus.queue.message} ${dependencyStatus.media.message}`;
+  healthState.verifiedAt = dependencyStatus.verifiedAt;
 
   if (getScraperExecutionMode() !== "queue") {
     console.warn(
@@ -216,7 +261,17 @@ try {
   } else {
     await runDbLoop();
   }
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  healthState.ok = false;
+  healthState.message = message;
+  healthState.verifiedAt = new Date().toISOString();
+  console.error("[scraper-worker] startup failed:", error);
+  process.exitCode = 1;
 } finally {
+  if (healthServer) {
+    await new Promise<void>((resolve) => healthServer?.close(() => resolve()));
+  }
   await closeScrapeQueueConnections();
   console.log(`[scraper-worker] stopping worker ${workerId}`);
 }
