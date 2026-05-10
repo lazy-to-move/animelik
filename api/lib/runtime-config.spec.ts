@@ -18,28 +18,33 @@ describe("runtime-config", () => {
     expect(report.media.mode).toBe("local");
   });
 
-  it("fails when bullmq is selected without REDIS_URL", () => {
+  it("falls back to the database queue when bullmq is selected without REDIS_URL", () => {
     const report = getRuntimeReadinessReport({
       role: "worker",
       env: {
         NODE_ENV: "production",
+        DATABASE_URL: "postgres://synx:synx@localhost:5432/synx",
+        APP_SECRET: "12345678901234567890123456789012",
         SCRAPER_EXECUTION_MODE: "queue",
         SCRAPER_QUEUE_BACKEND: "bullmq",
       },
     });
 
-    expect(report.ready).toBe(false);
-    expect(report.checks.some((check) => check.key === "redis_url")).toBe(true);
+    expect(report.ready).toBe(true);
+    expect(report.queue.backend).toBe("db");
+    expect(report.checks.some((check) => check.key === "redis_fallback")).toBe(true);
     expect(() =>
       assertRuntimeReadiness({
         role: "worker",
         env: {
           NODE_ENV: "production",
+          DATABASE_URL: "postgres://synx:synx@localhost:5432/synx",
+          APP_SECRET: "12345678901234567890123456789012",
           SCRAPER_EXECUTION_MODE: "queue",
           SCRAPER_QUEUE_BACKEND: "bullmq",
         },
       }),
-    ).toThrow(/REDIS_URL/i);
+    ).not.toThrow();
   });
 
   it("fails when BullMQ uses an invalid queue name", () => {

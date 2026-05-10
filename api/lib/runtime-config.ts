@@ -55,11 +55,15 @@ function getExecutionMode(env: EnvLike): RuntimeExecutionMode {
 
 function getQueueBackend(env: EnvLike): RuntimeQueueBackend {
   const configured = normalizeLower(env.SCRAPER_QUEUE_BACKEND);
+  const hasRedis = hasValue(env.REDIS_URL);
   if (configured === "db" || configured === "bullmq") {
+    if (configured === "bullmq" && !hasRedis) {
+      return "db";
+    }
     return configured;
   }
 
-  return hasValue(env.REDIS_URL) ? "bullmq" : "db";
+  return hasRedis ? "bullmq" : "db";
 }
 
 function getMediaMode(env: EnvLike): RuntimeMediaMode {
@@ -144,12 +148,13 @@ export function getRuntimeReadinessReport(input?: {
     });
   }
 
-  if (queueMode === "queue" && queueBackend === "bullmq" && !hasValue(env.REDIS_URL)) {
+  const requestedQueueBackend = normalizeLower(env.SCRAPER_QUEUE_BACKEND);
+  if (queueMode === "queue" && requestedQueueBackend === "bullmq" && !hasValue(env.REDIS_URL)) {
     checks.push({
-      key: "redis_url",
-      status: "error",
+      key: "redis_fallback",
+      status: "warn",
       message:
-        "SCRAPER_QUEUE_BACKEND=bullmq requires REDIS_URL so the web app and worker can dispatch and process queue jobs.",
+        "SCRAPER_QUEUE_BACKEND=bullmq was requested without REDIS_URL, so the app will fall back to the database queue until Redis is configured.",
     });
   }
 

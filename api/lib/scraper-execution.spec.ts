@@ -56,6 +56,13 @@ describe("getScraperQueueBackend", () => {
 
     expect(getScraperQueueBackend()).toBe("db");
   });
+
+  it("falls back to the db queue when bullmq is requested without redis", () => {
+    process.env.SCRAPER_QUEUE_BACKEND = "bullmq";
+    delete process.env.REDIS_URL;
+
+    expect(getScraperQueueBackend()).toBe("db");
+  });
 });
 
 describe("shouldStartEpisodeScheduler", () => {

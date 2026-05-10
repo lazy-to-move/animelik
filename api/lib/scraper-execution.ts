@@ -17,12 +17,17 @@ export function isScraperQueueMode() {
 
 export function getScraperQueueBackend(): ScraperQueueBackend {
   const configured = process.env.SCRAPER_QUEUE_BACKEND?.trim().toLowerCase();
+  const hasRedis = Boolean(process.env.REDIS_URL?.trim());
 
-  if (configured === "db" || configured === "bullmq") {
+  if (configured === "db") {
     return configured;
   }
 
-  return process.env.REDIS_URL?.trim() ? "bullmq" : "db";
+  if (configured === "bullmq") {
+    return hasRedis ? "bullmq" : "db";
+  }
+
+  return hasRedis ? "bullmq" : "db";
 }
 
 export function getScraperExecutionMessage() {
@@ -30,6 +35,11 @@ export function getScraperExecutionMessage() {
 
   if (mode === "queue") {
     const backend = getScraperQueueBackend();
+    const requestedBackend = process.env.SCRAPER_QUEUE_BACKEND?.trim().toLowerCase();
+    const isRedisFallback = requestedBackend === "bullmq" && backend === "db";
+    if (isRedisFallback) {
+      return "BullMQ was requested, but REDIS_URL is not configured, so scraper jobs are falling back to the database queue. Add Redis later to re-enable BullMQ without changing code.";
+    }
     return backend === "bullmq"
       ? "Scraper jobs are queued through Redis/BullMQ and processed by the background worker. Keep both Redis and the worker service online so imports and syncs can finish."
       : "Scraper jobs are queued in the database and processed by the background worker. Keep the worker service online so imports and syncs can finish.";
