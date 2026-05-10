@@ -11,7 +11,7 @@ import { verifyRuntimeDependencies } from "./lib/runtime-dependencies";
 import { env } from "./lib/env";
 import { isHttpError } from "./lib/http-error";
 import { getPreferredPublicSiteOrigin } from "./lib/public-web";
-import { assertRuntimeReadiness } from "./lib/runtime-config";
+import { getRuntimeReadinessReport } from "./lib/runtime-config";
 import { shouldStartEpisodeScheduler } from "./lib/scraper-execution";
 import { startScheduler } from "./services/scraper/scheduler";
 import { getDb } from "./queries/connection";
@@ -55,7 +55,7 @@ import { authenticateRequest } from "./session-auth";
 type JsonHeaderInput = Headers | Record<string, string> | Array<[string, string]>;
 
 const app = new Hono<{ Bindings: HttpBindings }>();
-const runtimeReadiness = assertRuntimeReadiness({ role: "web" });
+const runtimeReadiness = getRuntimeReadinessReport({ role: "web" });
 let runtimeDependencies:
   | Awaited<ReturnType<typeof verifyRuntimeDependencies>>
   | null = null;
@@ -485,10 +485,17 @@ if (env.isProduction) {
   const { serve } = await import("@hono/node-server");
   const { serveStaticFiles } = await import("./lib/vite");
   serveStaticFiles(app);
-  runtimeDependencies = await verifyRuntimeDependencies({ role: "web" });
   console.log(`[runtime] ${runtimeReadiness.summary}`);
-  console.log(`[runtime] ${runtimeDependencies.queue.message}`);
-  console.log(`[runtime] ${runtimeDependencies.media.message}`);
+
+  if (runtimeReadiness.ready) {
+    runtimeDependencies = await verifyRuntimeDependencies({ role: "web" });
+    console.log(`[runtime] ${runtimeDependencies.queue.message}`);
+    console.log(`[runtime] ${runtimeDependencies.media.message}`);
+  } else {
+    for (const check of runtimeReadiness.checks.filter((check) => check.status === "error")) {
+      console.error(`[runtime] ${check.message}`);
+    }
+  }
 
   if (shouldStartEpisodeScheduler()) {
     startScheduler(6 * 60 * 60 * 1000);

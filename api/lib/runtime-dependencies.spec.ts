@@ -42,6 +42,7 @@ describe("runtime-dependencies", () => {
 
   it("pings Redis when BullMQ is enabled", async () => {
     process.env.NODE_ENV = "production";
+    process.env.DATABASE_URL = "postgres://synx:synx@localhost:5432/synx";
     process.env.SITE_URL = "https://synx.example";
     process.env.APP_SECRET = "12345678901234567890123456789012";
     process.env.SCRAPER_EXECUTION_MODE = "queue";
@@ -69,6 +70,7 @@ describe("runtime-dependencies", () => {
 
   it("checks object storage when s3 mode is enabled", async () => {
     process.env.NODE_ENV = "production";
+    process.env.DATABASE_URL = "postgres://synx:synx@localhost:5432/synx";
     process.env.SITE_URL = "https://synx.example";
     process.env.APP_SECRET = "12345678901234567890123456789012";
     process.env.MEDIA_STORAGE_MODE = "s3";

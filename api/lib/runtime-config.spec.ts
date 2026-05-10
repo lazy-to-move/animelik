@@ -63,6 +63,8 @@ describe("runtime-config", () => {
       role: "web",
       env: {
         NODE_ENV: "production",
+        DATABASE_URL: "postgres://synx:synx@localhost:5432/synx",
+        APP_SECRET: "12345678901234567890123456789012",
         MEDIA_STORAGE_MODE: "s3",
       },
     });
@@ -77,6 +79,8 @@ describe("runtime-config", () => {
       role: "web",
       env: {
         NODE_ENV: "production",
+        DATABASE_URL: "postgres://synx:synx@localhost:5432/synx",
+        APP_SECRET: "12345678901234567890123456789012",
         GOOGLE_CLIENT_ID: "server-client-id",
       },
     });
@@ -87,11 +91,25 @@ describe("runtime-config", () => {
     ).toBe("warn");
   });
 
+  it("fails when production is missing DATABASE_URL or APP_SECRET", () => {
+    const report = getRuntimeReadinessReport({
+      role: "web",
+      env: {
+        NODE_ENV: "production",
+      },
+    });
+
+    expect(report.ready).toBe(false);
+    expect(report.checks.some((check) => check.key === "database_url")).toBe(true);
+    expect(report.checks.some((check) => check.key === "app_secret")).toBe(true);
+  });
+
   it("marks fully configured bullmq plus s3 production as ready", () => {
     const report = getRuntimeReadinessReport({
       role: "worker",
       env: {
         NODE_ENV: "production",
+        DATABASE_URL: "postgres://synx:synx@localhost:5432/synx",
         SITE_URL: "https://synx.example",
         APP_SECRET: "12345678901234567890123456789012",
         SCRAPER_EXECUTION_MODE: "queue",

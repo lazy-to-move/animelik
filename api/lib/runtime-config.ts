@@ -118,6 +118,32 @@ export function getRuntimeReadinessReport(input?: {
   const mediaMode = getMediaMode(env);
   const checks: RuntimeCheck[] = [];
 
+  if (env.NODE_ENV === "production" && !hasValue(env.DATABASE_URL)) {
+    checks.push({
+      key: "database_url",
+      status: "error",
+      message: "DATABASE_URL is required in production so the app can reach PostgreSQL.",
+    });
+  }
+
+  if (env.NODE_ENV === "production" && !hasValue(env.APP_SECRET)) {
+    checks.push({
+      key: "app_secret",
+      status: "error",
+      message:
+        "APP_SECRET is required in production so session cookies and JWT-based auth can be signed and verified.",
+    });
+  }
+
+  if (env.NODE_ENV === "production" && !hasValue(env.APP_ID)) {
+    checks.push({
+      key: "app_id",
+      status: "warn",
+      message:
+        "APP_ID is not configured, so newly created sessions will fall back to a generic local client id.",
+    });
+  }
+
   if (queueMode === "queue" && queueBackend === "bullmq" && !hasValue(env.REDIS_URL)) {
     checks.push({
       key: "redis_url",

@@ -43,11 +43,14 @@ RUN apt-get update \
 
 FROM base AS deps
 COPY package.json package-lock.json ./
-RUN npm ci --prefer-offline --no-audit
+COPY apps/public-web/package.json apps/public-web/package-lock.json ./apps/public-web/
+RUN npm ci --prefer-offline --no-audit \
+    && npm --prefix apps/public-web ci --prefer-offline --no-audit
 
 FROM deps AS build
 COPY . .
-RUN npm run build
+RUN npm run build \
+    && npm run next:build
 
 FROM base AS production
 WORKDIR /app
@@ -56,7 +59,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
 COPY --from=build /app/db ./db
-COPY package.json start-prod.mjs start-worker.mjs ./
+COPY --from=build /app/apps/public-web ./apps/public-web
+COPY package.json start-prod.mjs start-worker.mjs start-public-web.mjs ./
 RUN mkdir -p /app/public/anime-covers /var/data/anime-covers
 
 EXPOSE 3000
